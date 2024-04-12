@@ -404,7 +404,7 @@ module  mod_goes_abi
             deallocate (ctt_2d)
             
          elseif ( is_Phase(ifile) ) then
-            allocate (ctph_2d(nx, ny))   
+            allocate (ctph_2d(nx, ny))
             call read_L2_Phase(ncid, nx, ny, ctph_2d, time_start(it))
             if ( time_start(it) /= scan_time(ifile) ) then
                write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
@@ -414,9 +414,9 @@ module  mod_goes_abi
             F_out(1:nx,1:ny,ifile)=ctph_2d(1:nx,1:ny)
             varname_out(ifile)='Phase_'//fsat_id
             deallocate (ctph_2d)
-            
+
          elseif ( is_HT(ifile) ) then
-            allocate (cth_2d(nx, ny))   
+            allocate (cth_2d(nx, ny))
             call read_L2_HT(ncid, nx, ny, cth_2d, time_start(it))
             if ( time_start(it) /= scan_time(ifile) ) then
                write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
@@ -426,7 +426,7 @@ module  mod_goes_abi
             F_out(1:nx,1:ny,ifile)=cth_2d(1:nx,1:ny)
             varname_out(ifile)='HT_'//fsat_id
             deallocate (cth_2d)
-            
+
          elseif ( is_PRES(ifile) ) then
             allocate (ctp_2d(nx, ny))   
             call read_L2_PRES(ncid, nx, ny, ctp_2d, time_start(it))
@@ -933,6 +933,7 @@ subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
    character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
    integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
    integer(i_short), allocatable    :: itmp_short_2d(:,:)
+   integer(i_kind),  allocatable    :: itmp_2d(:,:)
    integer(i_kind)                  :: nf_status
    integer(i_kind)                  :: istart(2), icount(2)
    integer(i_kind)                  :: varid, i, j
@@ -941,6 +942,7 @@ subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
    integer(i_kind)                  :: rmiss = -999.0
    real(r_single)                   :: scalef, offset
    integer(i_kind)                  :: qf(nx,ny)
+   character(len=4)                 :: l_unsigned
    continue
 
    ! time_start is the same for all bands, but time_end is not
@@ -972,17 +974,54 @@ subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
    nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+   nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
+   if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned 
+   ! convert unsigned short to signed short
+   write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   write(*,*) "kind of itmp_short_2d =", kind(itmp_short_2d)
+   write(*,*) "kind of 0 =", kind(0_2)
+   write(*,*) "kind of 0. =", kind(0._4)
+   write(*,*) "kind of 0. =", kind(0._8)
+   if( l_unsigned == "true" ) then
+      write(*,*) "do something"
+      !where( itmp_short_2d .lt. 0 ) itmp_short_2d=itmp_short_2d+65536
+      allocate(itmp_2d(nx,ny))
+      itmp_2d = itmp_short_2d
+      do j = 1, ny
+         do i = 1, nx
+            write(*,*) itmp_short_2d(i,j), itmp_2d(i,j)
+            if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
+            !if ( itmp_short_2d(i,j) .lt. 32768 ) then
+               write(*,*) "convert!!!!"
+               !itmp_short_2d(i,j) = itmp_short_2d(i,j) + 65536_i_short  ! Integer too big for its kind at
+               !itmp_short_2d(i,j) = itmp_short_2d(i,j) + 32768
+               !write(*,*) itmp_short_2d(i,j)
+               itmp_2d(i,j) = itmp_2d(i,j) + 65536
+               write(*,*) itmp_2d(i,j)
+            end if
+         end do
+      end do
+   end if
+   write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+
+
    cth(:,:) = rmiss
    do j = 1, ny
       do i = 1, nx
          if ( itmp_short_2d(i,j) /= ifill ) then
             if (qf(i,j) == 0 ) then ! good quality
-               cth(i,j) = offset + itmp_short_2d(i,j) * scalef
+               if( l_unsigned == "true" ) then
+                  cth(i,j) = offset + itmp_2d(i,j) * scalef
+               else
+                  cth(i,j) = offset + itmp_short_2d(i,j) * scalef
+               end if
             end if
          end if
       end do
    end do
    deallocate(itmp_short_2d)
+   if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
    return
 end subroutine read_L2_HT

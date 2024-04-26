@@ -166,7 +166,7 @@ program  main
    ! buid kd-tree
    nn=1  ! number of nearest points !BJJ set "1". No need to be "3"
    allocate (interp_indx(nn, nS_valid))
-   interp_indx=-999.0 !init
+   interp_indx=-999 !init
    ageometry = atlas_geometry("UnitSphere")
    kd = atlas_indexkdtree(ageometry)
    call kd%reserve(nC)
@@ -212,9 +212,9 @@ program  main
 
          !for regional model domain, skip if bdymask=6 or 7
          if( allocated(bdymask_mpas) .and. &
-            ix .eq. -999.0        .or.  &       ! this condition will not meet
-            bdymask_mpas(ix).eq.6 .or.  &
-            bdymask_mpas(ix).eq.7       ) cycle ! regional model domain
+            ix .eq. -999          .or.  &       ! this condition will not meet
+            bdymask_mpas(ix).eq.6 .or.  &       ! bdy of regional model domain
+            bdymask_mpas(ix).eq.7       ) cycle ! bdy of regional model domain
 
          cnt_match(ix)=cnt_match(ix)+1
       end do
@@ -251,10 +251,8 @@ program  main
    do iS = 1, nS_valid
       ix=interp_indx(1,iS)
       !for regional model domain, skip if bdymask=6 or 7 or out of min/max of lat/lon
-      if( allocated(bdymask_mpas) .and. &
-         ix .eq. -999.0        .or.  &       ! this condition will not meet
-         bdymask_mpas(ix).eq.6 .or.  &
-         bdymask_mpas(ix).eq.7       ) cycle ! regional model domain
+      if( allocated(bdymask_mpas) .and. ix .eq. -999 )       cycle !this condition can be met
+      if( bdymask_mpas(ix).eq.6 .or. bdymask_mpas(ix).eq.7 ) cycle !bdy of regional model domain
       cnt_match(ix)=cnt_match(ix)+1
       lon_s_dist(cnt_match(ix),ix)=lon_s_valid(iS)*deg2rad  !pass as [radian] to make the next step [dist] easier.
       lat_s_dist(cnt_match(ix),ix)=lat_s_valid(iS)*deg2rad

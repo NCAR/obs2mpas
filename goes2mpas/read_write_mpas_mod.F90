@@ -7,12 +7,13 @@ module  mod_read_write_mpas
 
    contains
 
-   subroutine read_mpas_latlon (fname, nC, lon, lat)
+   subroutine read_mpas_latlon (fname, nC, lon, lat, bdymask)
 
    implicit none
-   character(len=256),        intent( in) :: fname
-   integer(i_kind),           intent(out) :: nC
-   real(r_kind), allocatable, intent(out) :: lon(:), lat(:) 
+   character(len=256),                  intent( in) :: fname
+   integer(i_kind),                     intent(out) :: nC
+   real(r_kind), allocatable,           intent(out) :: lon(:), lat(:) 
+   real(r_kind), allocatable, optional, intent(out) :: bdymask(:)
    ! loc
    integer(i_kind) :: ncid, nf_status, dimid, varid
    logical :: isfile
@@ -40,6 +41,12 @@ module  mod_read_write_mpas
    nf_status = nf90_GET_VAR(ncid, varid, lon(:))
    nf_status = nf90_INQ_VARID(ncid, 'latCell', varid)
    nf_status = nf90_GET_VAR(ncid, varid, lat(:))
+   !optionally read 'bdyMaskCell' for regional model domain
+   nf_status = nf90_INQ_VARID(ncid, 'bdyMaskCell', varid)
+   if ( nf_status == 0 ) then
+      allocate( bdymask(nC) )
+      nf_status = nf90_GET_VAR(ncid, varid, bdymask(:))
+   end if
 
    nf_status = nf90_CLOSE(ncid)
 

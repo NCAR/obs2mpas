@@ -33,7 +33,9 @@ program  main
    !mpas lat/lon and interpolated field
    integer :: nC, iC  ! nC: total number of MPAS grid
    real(sp), allocatable :: lon_mpas(:), lat_mpas(:)       ! to read. depend on the NetCDF file.
+   real(sp), allocatable :: bdymask_mpas(:)                ! optional for regional mpas domain
    real(dp), allocatable :: lon_mpas_dp(:), lat_mpas_dp(:) ! double precision for kd-tree
+   real(dp)  :: lon_min, lon_max, lat_min, lat_max         ! for regional model domain
    real(sp), allocatable :: field_mpas(:,:)                ! interpolated field_s (nC,nfield)
    real(sp), allocatable :: field_mpas_std(:,:)            ! For SO, std info     (nC,nfield)
 
@@ -142,7 +144,7 @@ program  main
 
    !----- 2. read MPAS lat/lon --------------------------------------------------
    ! read lon / lat from MPAS file
-   call read_mpas_latlon (f_mpas_latlon, nC, lon_mpas, lat_mpas)  ! unit [radian], single precision
+   call read_mpas_latlon (f_mpas_latlon, nC, lon_mpas, lat_mpas, bdymask_mpas)  ! unit [radian], single precision
    lon_mpas_dp=lon_mpas ! pass double precision for kd-tree
    lat_mpas_dp=lat_mpas
    do iC=1,nC
@@ -150,11 +152,21 @@ program  main
       if(lon_mpas_dp(iC).gt.pi) lon_mpas_dp(iC)=lon_mpas_dp(iC)-2.d0*pi
    end do
 
+   if( allocated(bdymask_mpas) ) then ! regional mpas domain
+      lon_min = minval(lon_mpas_dp) * rad2deg
+      lon_max = maxval(lon_mpas_dp) * rad2deg
+      lat_min = minval(lat_mpas_dp) * rad2deg
+      lat_max = maxval(lat_mpas_dp) * rad2deg
+      write(*,*) "BJJ: This is regional domain: lon_min, lon_max, lat_min, lat_max=",&
+         lon_min, lon_max, lat_min, lat_max
+   end if
+
 
    !----- 3. build and search kd-tree -------------------------------------------
    ! buid kd-tree
    nn=1  ! number of nearest points !BJJ set "1". No need to be "3"
    allocate (interp_indx(nn, nS_valid))
+   interp_indx=-999 !init
    ageometry = atlas_geometry("UnitSphere")
    kd = atlas_indexkdtree(ageometry)
    call kd%reserve(nC)
@@ -173,6 +185,13 @@ program  main
       call date_and_time(VALUES=tval)
       write (6, 777) 'kd%closestPoints start',tval(1),'-',tval(2),'-',tval(3),tval(5),':',tval(6),':',tval(7)
       do iS=1, nS_valid
+         !quick decision for regional model domain: out of min/max of lon/lat
+         if( allocated(bdymask_mpas) .and.     &
+             lon_s_valid(iS) .lt. lon_min .or. &
+             lon_s_valid(iS) .gt. lon_max .or. &
+             lat_s_valid(iS) .lt. lat_min .or. &
+             lat_s_valid(iS) .gt. lat_max        ) cycle
+
          ! get nn index
          call kd%closestPoints(lon_s_valid(iS)*deg2rad, lat_s_valid(iS)*deg2rad, &  !need a unit of [radian]
                                nn, interp_indx(:,iS))
@@ -190,6 +209,13 @@ program  main
 
          !count # of matching. NOTE: this also works even when nn is not "1".
          ix=interp_indx(1,iS)
+
+         !for regional model domain, skip if bdymask=6 or 7
+         if( allocated(bdymask_mpas) .and. &
+            ix .eq. -999          .or.  &       ! this condition will not meet
+            bdymask_mpas(ix).eq.6 .or.  &       ! bdy of regional model domain
+            bdymask_mpas(ix).eq.7       ) cycle ! bdy of regional model domain
+
          cnt_match(ix)=cnt_match(ix)+1
       end do
       call date_and_time(VALUES=tval)
@@ -224,6 +250,9 @@ program  main
 
    do iS = 1, nS_valid
       ix=interp_indx(1,iS)
+      !for regional model domain, skip if bdymask=6 or 7 or out of min/max of lat/lon
+      if( allocated(bdymask_mpas) .and. ix .eq. -999 )       cycle !this condition can be met
+      if( bdymask_mpas(ix).eq.6 .or. bdymask_mpas(ix).eq.7 ) cycle !bdy of regional model domain
       cnt_match(ix)=cnt_match(ix)+1
       lon_s_dist(cnt_match(ix),ix)=lon_s_valid(iS)*deg2rad  !pass as [radian] to make the next step [dist] easier.
       lat_s_dist(cnt_match(ix),ix)=lat_s_valid(iS)*deg2rad

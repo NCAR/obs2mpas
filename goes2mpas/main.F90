@@ -38,6 +38,7 @@ program  main
    real(dp)  :: lon_min, lon_max, lat_min, lat_max         ! for regional model domain
    real(sp), allocatable :: field_mpas(:,:)                ! interpolated field_s (nC,nfield)
    real(sp), allocatable :: field_mpas_std(:,:)            ! For SO, std info     (nC,nfield)
+   logical :: l_regional_domain = .false.                  ! flag for regional mpas domain, initialized as .false.
 
    !kd-tree
    type(atlas_indexkdtree) :: kd
@@ -152,7 +153,8 @@ program  main
       if(lon_mpas_dp(iC).gt.pi) lon_mpas_dp(iC)=lon_mpas_dp(iC)-2.d0*pi
    end do
 
-   if( allocated(bdymask_mpas) ) then ! regional mpas domain
+   if( allocated(bdymask_mpas) ) l_regional_domain = .true.
+   if( l_regional_domain ) then ! regional mpas domain
       lon_min = minval(lon_mpas_dp) * rad2deg
       lon_max = maxval(lon_mpas_dp) * rad2deg
       lat_min = minval(lat_mpas_dp) * rad2deg
@@ -186,11 +188,12 @@ program  main
       write (6, 777) 'kd%closestPoints start',tval(1),'-',tval(2),'-',tval(3),tval(5),':',tval(6),':',tval(7)
       do iS=1, nS_valid
          !quick decision for regional model domain: out of min/max of lon/lat
-         if( allocated(bdymask_mpas) .and.     &
-             lon_s_valid(iS) .lt. lon_min .or. &
-             lon_s_valid(iS) .gt. lon_max .or. &
-             lat_s_valid(iS) .lt. lat_min .or. &
-             lat_s_valid(iS) .gt. lat_max        ) cycle
+         if( l_regional_domain ) then
+            if(  lon_s_valid(iS) .lt. lon_min .or. &
+                 lon_s_valid(iS) .gt. lon_max .or. &
+                 lat_s_valid(iS) .lt. lat_min .or. &
+                 lat_s_valid(iS) .gt. lat_max        ) cycle
+         end if
 
          ! get nn index
          call kd%closestPoints(lon_s_valid(iS)*deg2rad, lat_s_valid(iS)*deg2rad, &  !need a unit of [radian]
@@ -211,10 +214,11 @@ program  main
          ix=interp_indx(1,iS)
 
          !for regional model domain, skip if bdymask=6 or 7
-         if( allocated(bdymask_mpas) .and. &
-            ix .eq. -999          .or.  &       ! this condition will not meet
-            bdymask_mpas(ix).eq.6 .or.  &       ! bdy of regional model domain
-            bdymask_mpas(ix).eq.7       ) cycle ! bdy of regional model domain
+         if( l_regional_domain) then
+            if( ix .eq. -999          .or.  &       ! this condition will not meet
+                bdymask_mpas(ix).eq.6 .or.  &       ! bdy of regional model domain
+                bdymask_mpas(ix).eq.7       ) cycle ! bdy of regional model domain
+         end if
 
          cnt_match(ix)=cnt_match(ix)+1
       end do
@@ -251,8 +255,10 @@ program  main
    do iS = 1, nS_valid
       ix=interp_indx(1,iS)
       !for regional model domain, skip if bdymask=6 or 7 or out of min/max of lat/lon
-      if( allocated(bdymask_mpas) .and. ix .eq. -999 )       cycle !this condition can be met
-      if( bdymask_mpas(ix).eq.6 .or. bdymask_mpas(ix).eq.7 ) cycle !bdy of regional model domain
+      if( l_regional_domain ) then
+         if( ix .eq. -999 ) cycle !this condition can be met.
+         if( bdymask_mpas(ix).eq.6 .or. bdymask_mpas(ix).eq.7 ) cycle !bdy of regional model domain
+      end if
       cnt_match(ix)=cnt_match(ix)+1
       lon_s_dist(cnt_match(ix),ix)=lon_s_valid(iS)*deg2rad  !pass as [radian] to make the next step [dist] easier.
       lat_s_dist(cnt_match(ix),ix)=lat_s_valid(iS)*deg2rad

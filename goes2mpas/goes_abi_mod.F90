@@ -863,20 +863,18 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
    ! convert unsigned short to signed short
    if( l_unsigned == "true" ) then
-      write(*,*) "do something"
       allocate(itmp_2d(nx,ny))
       itmp_2d = itmp_short_2d
       do j = 1, ny
          do i = 1, nx
             if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
-               !write(*,*) "convert!!!!"
                itmp_2d(i,j) = itmp_2d(i,j) + 65536
             end if
          end do
       end do
    end if
-   write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-   write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
    ctt(:,:) = rmiss
    do j = 1, ny
@@ -892,7 +890,7 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
          end if
       end do
    end do
-   write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
+   !write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
    deallocate(itmp_short_2d)
    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
@@ -1006,20 +1004,18 @@ subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned 
    ! convert unsigned short to signed short
    if( l_unsigned == "true" ) then
-      write(*,*) "do something"
       allocate(itmp_2d(nx,ny))
       itmp_2d = itmp_short_2d
       do j = 1, ny
          do i = 1, nx
             if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
-               !write(*,*) "convert!!!!"
                itmp_2d(i,j) = itmp_2d(i,j) + 65536
             end if
          end do
       end do
    end if
-   write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-   write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
    cth(:,:) = rmiss
    do j = 1, ny
@@ -1035,7 +1031,7 @@ subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
          end if
       end do
    end do
-   write(*,*) "min/max of cth =", minval(cth), maxval(cth)
+   !write(*,*) "min/max of cth =", minval(cth), maxval(cth)
    deallocate(itmp_short_2d)
    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
@@ -1095,20 +1091,18 @@ subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
    ! convert unsigned short to signed short
    if( l_unsigned == "true" ) then
-      write(*,*) "do something"
       allocate(itmp_2d(nx,ny))
       itmp_2d = itmp_short_2d
       do j = 1, ny
          do i = 1, nx
             if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
-               !write(*,*) "convert!!!!"
                itmp_2d(i,j) = itmp_2d(i,j) + 65536
             end if
          end do
       end do
    end if
-   write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-   write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
    ctp(:,:) = rmiss
    do j = 1, ny
@@ -1124,7 +1118,7 @@ subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
          end if
       end do
    end do
-   write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
+   !write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
    deallocate(itmp_short_2d)
    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 

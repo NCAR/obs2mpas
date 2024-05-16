@@ -29,13 +29,13 @@ goes2mpas
 main.F90
    - 0. read namelist
    - 1. read ABI lat/lon & data
-   - 3. read MPAS lat/lon
+   - 2. read MPAS lat/lon
    - 3. build and search kd-tree
    - 4. re-organize the matching pairs
    - 5. interpolate the obs fields into model mesh either superob or nearest neighbor.
-   - 6. Write the interpolated fields to MPAS file
+   - 6a. Write the interpolated fields to MPAS file
+   - 6b. Write the interpolated fields to IODA file
 ```
-
 
 namelist.obs2model
 ------------------
@@ -46,6 +46,8 @@ namelist.obs2model
   l_read_indx   = .true. or .false.,   ! read index and counnt for matching ABI-MPAS pairs
   l_write_indx  = .true. or .false.,   ! write index and counnt for matching ABI-MPAS pairs
   l_superob     = .true.,   ! .true.= mesh-based superob, .false.= nearest-neighbor
+  l_write_o2m_iodav1 = .true.,  ! .true. = write superob/nearest-neighbor into ioda v1 file
+                                ! .false.= write superob/nearest-neighbor into MPAS file
 
 &data_nml
   This section is the same as https://github.com/jamiebresch/obs2ioda

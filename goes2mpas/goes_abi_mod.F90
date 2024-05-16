@@ -47,6 +47,8 @@ module  mod_goes_abi
    character(len=14), parameter :: BCM_id   = 'OR_ABI-L2-ACMF'
    character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'
    character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'
+   character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'
+   character(len=14), parameter :: PRES_id  = 'OR_ABI-L2-CTPF'
 
    integer(i_kind), parameter :: nband      = 10  ! IR bands 7-16
    integer(i_kind) :: band_start = 7
@@ -68,6 +70,8 @@ module  mod_goes_abi
    integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
    real(r_kind),    allocatable :: ctt_2d(:,:)  ! cloud top temperature(nx,ny) !BJJ
    real(r_kind),    allocatable :: ctph_2d(:,:) ! cloud top phase(nx,ny) !BJJ
+   real(r_kind),    allocatable :: cth_2d(:,:)  ! cloud top height(nx,ny) !BJJ
+   real(r_kind),    allocatable :: ctp_2d(:,:)  ! cloud top pressure(nx,ny) !BJJ
 
    type rad_type
       real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
@@ -105,7 +109,7 @@ module  mod_goes_abi
    logical                         :: isfile
    logical                         :: found_time
    logical                         :: got_grid_info
-   logical, allocatable            :: valid(:), is_BCM(:), is_TEMP(:), is_Phase(:)
+   logical, allocatable            :: valid(:), is_BCM(:), is_TEMP(:), is_Phase(:), is_HT(:), is_PRES(:)
    character(len=256), allocatable :: nc_fnames(:)
    character(len=256)              :: fname
    character(len=256)              :: out_fname
@@ -196,10 +200,14 @@ module  mod_goes_abi
    allocate (is_BCM(nfile))
    allocate (is_TEMP(nfile)) !BJJ
    allocate (is_Phase(nfile)) !BJJ
+   allocate (is_HT(nfile)) !BJJ
+   allocate (is_PRES(nfile)) !BJJ
    valid( :) = .false.
    is_BCM(:) = .false.
    is_TEMP(:) = .false.
    is_Phase(:) = .false.
+   is_HT(:) = .false.
+   is_PRES(:) = .false.
 
    nlen = len_trim(data_id)
    mode_id = data_id(nlen-1:nlen)
@@ -219,7 +227,7 @@ module  mod_goes_abi
 
       ! retrieve some basic info from the netcdf filename itself
       call decode_nc_fname(trim(nc_fnames(ifile)),finfo, scan_mode, &
-         is_BCM(ifile), is_TEMP(ifile), is_Phase(ifile), &
+         is_BCM(ifile), is_TEMP(ifile), is_Phase(ifile), is_HT(ifile), is_PRES(ifile), &
          fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile))
 
       ! all files must be the same mode
@@ -231,7 +239,8 @@ module  mod_goes_abi
          cycle file_loop1
       end if
 
-      if ( .not. ( is_BCM(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) ) ) then
+      if ( .not. ( is_BCM(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) & 
+                 .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
          ! id of the file name must match specified data_id
          if ( finfo /= data_id ) then
             cycle file_loop1
@@ -333,7 +342,7 @@ module  mod_goes_abi
          it = ftime_id(ifile)
          ib = fband_id(ifile)
 
-         if ( .not. ( is_BCM(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) ) ) then
+         if ( .not. ( is_BCM(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
 
             call read_GRB(ncid, nx, ny, rad_2d, bt_2d, qf_2d, sdtb, band_id, time_start(it))
 
@@ -395,7 +404,7 @@ module  mod_goes_abi
             deallocate (ctt_2d)
             
          elseif ( is_Phase(ifile) ) then
-            allocate (ctph_2d(nx, ny))   
+            allocate (ctph_2d(nx, ny))
             call read_L2_Phase(ncid, nx, ny, ctph_2d, time_start(it))
             if ( time_start(it) /= scan_time(ifile) ) then
                write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
@@ -405,6 +414,30 @@ module  mod_goes_abi
             F_out(1:nx,1:ny,ifile)=ctph_2d(1:nx,1:ny)
             varname_out(ifile)='Phase_'//fsat_id
             deallocate (ctph_2d)
+
+         elseif ( is_HT(ifile) ) then
+            allocate (cth_2d(nx, ny))
+            call read_L2_HT(ncid, nx, ny, cth_2d, time_start(it))
+            if ( time_start(it) /= scan_time(ifile) ) then
+               write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
+               cycle file_loop2
+            end if
+            !BJJ copy to output array: use ifile index
+            F_out(1:nx,1:ny,ifile)=cth_2d(1:nx,1:ny)
+            varname_out(ifile)='HT_'//fsat_id
+            deallocate (cth_2d)
+
+         elseif ( is_PRES(ifile) ) then
+            allocate (ctp_2d(nx, ny))   
+            call read_L2_PRES(ncid, nx, ny, ctp_2d, time_start(it))
+            if ( time_start(it) /= scan_time(ifile) ) then
+               write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
+               cycle file_loop2
+            end if
+            !BJJ copy to output array: use ifile index
+            F_out(1:nx,1:ny,ifile)=ctp_2d(1:nx,1:ny)
+            varname_out(ifile)='PRES_'//fsat_id
+            deallocate (ctp_2d)
             
          else
             write(0,*) 'ERROR: something is wrong. check the files'
@@ -460,6 +493,8 @@ module  mod_goes_abi
    deallocate(is_BCM)
    deallocate(is_TEMP) !BJJ
    deallocate(is_Phase) !BJJ
+   deallocate(is_HT) !BJJ
+   deallocate(is_PRES) !BJJ
 
  end subroutine Goes_ReBroadcast_converter
 
@@ -706,6 +741,7 @@ subroutine read_GRB(ncid, nx, ny, rad, bt, qf, sd, band_id, time_start)
    do j = 1, ny
       do i = 1, nx
          if ( itmp_short_2d(i,j) /= ifill ) then
+            if ( itmp_short_2d(i,j) .lt. 0_i_short ) STOP 777
             rad(i,j) = offset + itmp_short_2d(i,j) * scalef
             if ( planck_fk1 /= rfill .and. planck_fk2 /= rfill .and. &
                  planck_bc1 /= rfill .and. planck_bc2 /= rfill ) then
@@ -782,6 +818,7 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
    character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
    integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
    integer(i_short), allocatable    :: itmp_short_2d(:,:)
+   integer(i_kind),  allocatable    :: itmp_2d(:,:)
    integer(i_kind)                  :: nf_status
    integer(i_kind)                  :: istart(2), icount(2)
    integer(i_kind)                  :: varid, i, j
@@ -790,6 +827,7 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
    integer(i_kind)                  :: rmiss = -999.0
    real(r_single)                   :: scalef, offset
    integer(i_kind)                  :: qf(nx,ny)
+   character(len=4)                 :: l_unsigned
    continue
 
    ! time_start is the same for all bands, but time_end is not
@@ -821,17 +859,40 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
    nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+   nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
+   if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
+   ! convert unsigned short to signed short
+   if( l_unsigned == "true" ) then
+      allocate(itmp_2d(nx,ny))
+      itmp_2d = itmp_short_2d
+      do j = 1, ny
+         do i = 1, nx
+            if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
+               itmp_2d(i,j) = itmp_2d(i,j) + 65536
+            end if
+         end do
+      end do
+   end if
+   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+
    ctt(:,:) = rmiss
    do j = 1, ny
       do i = 1, nx
          if ( itmp_short_2d(i,j) /= ifill ) then
             if (qf(i,j) == 0 ) then ! good quality
-               ctt(i,j) = offset + itmp_short_2d(i,j) * scalef
+               if( l_unsigned == "true" ) then
+                  ctt(i,j) = offset + itmp_2d(i,j) * scalef
+               else
+                  ctt(i,j) = offset + itmp_short_2d(i,j) * scalef
+               end if
             end if
          end if
       end do
    end do
+   !write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
    deallocate(itmp_short_2d)
+   if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
    return
 end subroutine read_L2_TEMP
@@ -890,8 +951,182 @@ subroutine read_L2_Phase(ncid, nx, ny, ctph, time_start)
    return
 end subroutine read_L2_Phase
 
+subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   real(r_kind),      intent(inout) :: cth(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   integer(i_short), allocatable    :: itmp_short_2d(:,:)
+   integer(i_kind),  allocatable    :: itmp_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_short)                 :: ifill
+   integer(i_kind)                  :: imiss = -999
+   integer(i_kind)                  :: rmiss = -999.0
+   real(r_single)                   :: scalef, offset
+   integer(i_kind)                  :: qf(nx,ny)
+   character(len=4)                 :: l_unsigned
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   qf(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         qf(i,j) = itmp_byte_2d(i,j)
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_short_2d(nx, ny))
+   nf_status = nf_INQ_VARID(ncid, 'HT', varid)
+   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+   nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
+   if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned 
+   ! convert unsigned short to signed short
+   if( l_unsigned == "true" ) then
+      allocate(itmp_2d(nx,ny))
+      itmp_2d = itmp_short_2d
+      do j = 1, ny
+         do i = 1, nx
+            if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
+               itmp_2d(i,j) = itmp_2d(i,j) + 65536
+            end if
+         end do
+      end do
+   end if
+   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+
+   cth(:,:) = rmiss
+   do j = 1, ny
+      do i = 1, nx
+         if ( itmp_short_2d(i,j) /= ifill ) then
+            if (qf(i,j) == 0 ) then ! good quality
+               if( l_unsigned == "true" ) then
+                  cth(i,j) = offset + itmp_2d(i,j) * scalef
+               else
+                  cth(i,j) = offset + itmp_short_2d(i,j) * scalef
+               end if
+            end if
+         end if
+      end do
+   end do
+   !write(*,*) "min/max of cth =", minval(cth), maxval(cth)
+   deallocate(itmp_short_2d)
+   if( allocated(itmp_2d) ) deallocate(itmp_2d)
+
+   return
+end subroutine read_L2_HT
+
+subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   real(r_kind),      intent(inout) :: ctp(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   integer(i_short), allocatable    :: itmp_short_2d(:,:)
+   integer(i_kind),  allocatable    :: itmp_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_short)                 :: ifill
+   integer(i_kind)                  :: imiss = -999
+   integer(i_kind)                  :: rmiss = -999.0
+   real(r_single)                   :: scalef, offset
+   integer(i_kind)                  :: qf(nx,ny)
+   character(len=4)                 :: l_unsigned
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   qf(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         qf(i,j) = itmp_byte_2d(i,j)
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_short_2d(nx, ny))
+   nf_status = nf_INQ_VARID(ncid, 'PRES', varid)
+   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+   nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
+   if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
+   ! convert unsigned short to signed short
+   if( l_unsigned == "true" ) then
+      allocate(itmp_2d(nx,ny))
+      itmp_2d = itmp_short_2d
+      do j = 1, ny
+         do i = 1, nx
+            if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
+               itmp_2d(i,j) = itmp_2d(i,j) + 65536
+            end if
+         end do
+      end do
+   end if
+   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+
+   ctp(:,:) = rmiss
+   do j = 1, ny
+      do i = 1, nx
+         if ( itmp_short_2d(i,j) /= ifill ) then
+            if (qf(i,j) == 0 ) then ! good quality
+               if( l_unsigned == "true" ) then
+                  ctp(i,j) = offset + itmp_2d(i,j) * scalef
+               else
+                  ctp(i,j) = offset + itmp_short_2d(i,j) * scalef
+               end if
+            end if
+         end if
+      end do
+   end do
+   !write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
+   deallocate(itmp_short_2d)
+   if( allocated(itmp_2d) ) deallocate(itmp_2d)
+
+   return
+end subroutine read_L2_PRES
+
 subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
-                           band_id, sat_id, start_time, jday)
+                           is_HT, is_PRES, band_id, sat_id, start_time, jday)
    implicit none
    character(len=*),  intent(in)  :: fname
    character(len=18), intent(out) :: finfo
@@ -899,6 +1134,8 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
    logical,           intent(out) :: is_BCM
    logical,           intent(out) :: is_TEMP
    logical,           intent(out) :: is_Phase
+   logical,           intent(out) :: is_HT
+   logical,           intent(out) :: is_PRES
    integer(i_kind),   intent(out) :: band_id
    character(len=3),  intent(out) :: sat_id
    character(len=22), intent(out) :: start_time
@@ -914,16 +1151,24 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
    else if ( fname( 1:15) == Phase_id ) then
       is_Phase = .true.
       band_id = -99
+   else if ( fname( 1:15) == HT_id ) then
+      is_HT = .true.
+      band_id = -99
+   else if ( fname( 1:14) == PRES_id ) then
+      is_PRES = .true.
+      band_id = -99
    else
       is_BCM = .false.
       is_TEMP = .false.
       is_Phase = .false.
+      is_HT = .false.
+      is_PRES = .false.
    end if
 
    !CG_ABI-L2-ACMC-M3_G16_s20180351202275_e20180351205060_c20180351205106.nc
    !OR_ABI-L1b-RadC-M3C16_G16_s20172741802196_e20172741804580_c20172741805015.nc
    !1234567890123456789012345678901234567890123456789012345678901234567890123456
-   if ( .not. ( is_BCM .or. is_TEMP .or. is_Phase ) ) then
+   if ( .not. ( is_BCM .or. is_TEMP .or. is_Phase .or. is_HT .or. is_PRES ) ) then
       read(fname( 1:18), '(a18)') finfo
       read(fname(17:18), '(a2)')  scan_mode
       read(fname(20:21), '(i2)')  band_id
@@ -939,8 +1184,9 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
       ! 2017-10-01T18:02:19.6Z
       write(start_time,'(i4.4,4(a,i2.2),a,i2.2,a,i1,a)') &
             year, '-', month, '-', day, 'T', hour, ':',  minute, ':', sec1, '.', sec2, 'Z'
-   else if ( is_BCM ) then
+   else if ( is_BCM .or. is_PRES ) then
    !OR_ABI-L2-ACMF-M3_G16_s20181050000419_e20181050011186_c20181050011347.nc
+   !OR_ABI-L2-CTPF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
    !1234567890123456789012345678901234567890123456789012345678901234567890123456
       read(fname( 1:17), '(a17)') finfo
       read(fname(16:17), '(a2)')  scan_mode
@@ -956,9 +1202,10 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
       ! 2017-10-01T18:02:19.6Z
       write(start_time,'(i4.4,4(a,i2.2),a,i2.2,a,i1,a)') &
             year, '-', month, '-', day, 'T', hour, ':',  minute, ':', sec1, '.', sec2, 'Z'
-   else if ( is_TEMP .or. is_Phase ) then
+   else if ( is_TEMP .or. is_Phase .or. is_HT ) then
       !OR_ABI-L2-ACHTF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
       !OR_ABI-L2-ACTPF-M3_G16_s20181050000419_e20181050011186_c20181050011460.nc
+      !OR_ABI-L2-ACHAF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
       !1234567890123456789012345678901234567890123456789012345678901234567890123456
       read(fname( 1:18), '(a18)') finfo
       read(fname(17:18), '(a2)')  scan_mode

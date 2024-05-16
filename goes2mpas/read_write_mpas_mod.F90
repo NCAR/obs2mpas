@@ -132,6 +132,16 @@ module  mod_read_write_mpas
             nf_status = nf90_put_att(ncid,varid,'description','0=clear_sky, 1=liquid_water, &
                         2=super_cooled_liquid_water, 3=mixed_phase, 4=ice, 5=unknown')
             nf_status = nf90_put_att(ncid,varid,'_FillValue',-999.0)
+         case ('HT_')
+            !float HT_G16(Time, nCells) ;
+            nf_status = nf90_put_att(ncid,varid,'long_name','ABI L2+ Cloud Top Height of '//varname(i)(4:6))
+            nf_status = nf90_put_att(ncid,varid,'units','m')
+            nf_status = nf90_put_att(ncid,varid,'_FillValue',-999.0)
+         case ('PRE')
+            !float PRES_G16(Time, nCells) ;
+            nf_status = nf90_put_att(ncid,varid,'long_name','ABI L2+ Cloud Top Pressure of '//varname(i)(6:8))
+            nf_status = nf90_put_att(ncid,varid,'units','hPa')
+            nf_status = nf90_put_att(ncid,varid,'_FillValue',-999.0)
          case default
       end select
    end do

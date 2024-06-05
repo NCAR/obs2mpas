@@ -1116,6 +1116,9 @@ subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
                end if
             end if
          end if
+         if ( itmp_short_2d(i,j) == ifill .and. qf(i,j) == 4 ) then !invalid_due_to_clear_or_probably_clear_sky_qf
+            ctp(i,j) = -777.
+         end if
       end do
    end do
    !write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)

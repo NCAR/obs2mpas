@@ -17,7 +17,7 @@ program  main
    implicit none
 
    ! local
-   integer :: i, j, icnt, istat
+   integer :: i, j, icnt, icnt2, istat
    integer :: nml_unit = 81
 
    integer :: nx, ny, nfield, ifld  ! x y dimension of raw satellite data, number of field read from satellite
@@ -290,14 +290,16 @@ program  main
                cycle !do nothing
             else
                ! do superob
-               icnt=count(field_s_dist(:,ifld,iC)/=-999.0) ! check the # of valid data
+               icnt=count(field_s_dist(:,ifld,iC)/=-999.0 .and. field_s_dist(:,ifld,iC)/=-777.0) ! check the # of valid data
+               icnt2=count(field_s_dist(:,ifld,iC)==-777.0)
+               if(icnt.eq.0 .and. icnt2.ne.0) field_mpas(iC,ifld) = -777.0 ! special treatment for clear CTP
                if(icnt.eq.0) cycle !do nothing
                if(icnt.gt.cnt_match(iC)) STOP 778 ! sanity check
                !if(icnt.ne cnt_match(iC)) write(*,*) "=========== WARNING ========== &
                !                          There are some missing values in paired- obs pixels", ifld, iC, icnt, cnt_match(iC)
                ! temporary array W/O any missing data
                allocate( array_so(icnt) )
-               array_so=pack(field_s_dist(:,ifld,iC), field_s_dist(:,ifld,iC)/=-999.0)
+               array_so=pack(field_s_dist(:,ifld,iC), field_s_dist(:,ifld,iC)/=-999.0 .and. field_s_dist(:,ifld,iC)/=-777.0)
                ! calculate mean
                field_mpas(iC,ifld) = sum(array_so(1:icnt)) / real(icnt) ! applied for both cloud mask and other physical quantities
                ! calculate std 

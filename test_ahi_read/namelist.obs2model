@@ -1,0 +1,17 @@
+&data_nml
+  nc_list_file = './flist.txt',
+  data_dir = '/glade/derecho/scratch/mrislam/work/pandac/data/himawari/2018/20180101/',   ! path of the GRB nc files
+  data_id = 'HS_H08', ! prefix of the downloaded HSD data files
+  sat_id = 'H08',
+  n_subsample = 1,
+  write_iodav1 = .false.,
+/
+
+&main_nml
+  f_mpas_latlon = '/glade/campaign/mmm/parc//liuz/pandac_common/30km/30km_GFSANA/x1.655362.init.2018-04-15_00.00.00.nc', ! MPAS file path/name to read lat & lon information
+  f_mpas_out    = './newfile.nc'   , ! MPAS file for writing the interpolated AHI fields
+  l_read_indx   = .true.,  ! read index and counnt for matching AHI-MPAS pairs
+  l_write_indx  = .false.,  ! write index and counnt for matching AHI-MPAS pairs
+  l_superob     = .true.,   ! .true.= mesh-based superob, .false.= nearest-neighbor
+  l_write_o2m_iodav1 = .true. ! .true.= write superob/neqrest-neighbor into ioda v1 file
+/

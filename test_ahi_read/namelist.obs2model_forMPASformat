@@ -1,0 +1,17 @@
+&data_nml
+  nc_list_file = './flist.txt',
+  data_dir = './', !'/glade/scratch/bjung/interp/data/',   ! path of the GRB nc files
+  data_id = 'OR_ABI-L1b-RadF-M3', ! prefix of the downloaded GRB nc files
+  sat_id = 'G16',
+  n_subsample = 1,
+  write_iodav1 = .false.,
+/
+
+&main_nml
+  f_mpas_latlon = '/glade/derecho/scratch/bjung/saca_new_mesh/mesh/x20.835586.grid_US.nc', ! MPAS file path/name to read lat & lon information
+  f_mpas_out    = './newfile.nc'   , ! MPAS file for writing the interpolated ABI fields
+  l_read_indx   = .true.,   ! read index and counnt for matching ABI-MPAS pairs
+  l_write_indx  = .false.,  ! write index and counnt for matching ABI-MPAS pairs
+  l_superob     = .true.,   ! .true.= mesh-based superob, .false.= nearest-neighbor
+  l_write_o2m_iodav1 = .false., ! .true.= write superob/neqrest-neighbor into ioda v1 file
+/

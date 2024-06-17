@@ -17,7 +17,7 @@ set( src_himawari2mpas
 )
 
 add_executable(himawari2mpas.x  ${src_himawari2mpas} )
-target_link_libraries(goes2mpas.x 
+target_link_libraries(himawari2mpas.x 
   PUBLIC
   NetCDF::NetCDF_Fortran
   eckit

@@ -6,21 +6,18 @@
 ! 27-Oct-2022
 !----------------------------------------------------------------------
 !
-module  mod_goes_abi
+module  mod_himawari_ahi                                                            ! MRI customizing existing module
 !
-! Purpose: Convert GOES ReBroadcast netCDF files to ioda-v1 format.
-!          Currently only processes bands 7-16.
+! Purpose: Convert Himawari HSD files to ioda-v1 format.                            ! modified by MRI  
 !
 ! input files:
-!    (1) flist.txt: contains a list of nc files (exclude path) to be processed
-!                     GoesReBroadcast file
-!                     (optional) Clear Sky Mask output of cspp-geo-aitf package
-!    (2) namelist.goes_abi_converter
+!    (1) flist.txt: contains a list of HSD files (exclude path) to be processed
+!    (2) namelist.himawari_ahi_converter
 !        &data_nml
-!          nc_list_file = 'flist.txt'
-!          data_dir = '/data/goes',         ! path of the GRB nc files
-!          data_id = 'OR_ABI-L1b-RadC-M3'   ! prefix of the downloaded GRB nc files
-!          sat_id = 'G16'
+!          hsd_list_file = 'flist.txt'                                                                   ! MRI changed from NC to HSD
+!          data_dir = '/glade/derecho/scratch/mrislam/work/pandac/data/himawari/2018/20180101',          ! path of the HSD files
+!          data_id = 'HS_H08'   ! prefix of the downloaded HSD files                                     ! modified by MRI  
+!          sat_id = 'H08'                                                                                ! modified by MRI  
 !          n_subsample = 1
 !        /
 
@@ -44,7 +41,7 @@ module  mod_goes_abi
 !!BJJ   integer, parameter  :: r_kind   = r_double               ! default real
 
    ! prefix of Clear Sky Mask (Binary Cloud Mask) output of cspp-geo-aitf package
-   character(len=14), parameter :: BCM_id   = 'OR_ABI-L2-ACMF'
+   character(len=14), parameter :: HSD_id   = 'HS_H08'
    character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'
    character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'
    character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'
@@ -109,7 +106,7 @@ module  mod_goes_abi
    logical                         :: isfile
    logical                         :: found_time
    logical                         :: got_grid_info
-   logical, allocatable            :: valid(:), is_BCM(:), is_TEMP(:), is_Phase(:), is_HT(:), is_PRES(:)
+   logical, allocatable            :: valid(:), is_HSD(:), is_TEMP(:), is_Phase(:), is_HT(:), is_PRES(:)
    character(len=256), allocatable :: nc_fnames(:)
    character(len=256)              :: fname
    character(len=256)              :: out_fname
@@ -197,13 +194,13 @@ module  mod_goes_abi
    allocate (julianday(nfile))
    allocate (fband_id(nfile))
    allocate (valid(nfile))
-   allocate (is_BCM(nfile))
+   allocate (is_HSD(nfile))
    allocate (is_TEMP(nfile)) !BJJ
    allocate (is_Phase(nfile)) !BJJ
    allocate (is_HT(nfile)) !BJJ
    allocate (is_PRES(nfile)) !BJJ
    valid( :) = .false.
-   is_BCM(:) = .false.
+   is_HSD(:) = .false.
    is_TEMP(:) = .false.
    is_Phase(:) = .false.
    is_HT(:) = .false.
@@ -227,7 +224,7 @@ module  mod_goes_abi
 
       ! retrieve some basic info from the netcdf filename itself
       call decode_nc_fname(trim(nc_fnames(ifile)),finfo, scan_mode, &
-         is_BCM(ifile), is_TEMP(ifile), is_Phase(ifile), is_HT(ifile), is_PRES(ifile), &
+         is_HSD(ifile), is_TEMP(ifile), is_Phase(ifile), is_HT(ifile), is_PRES(ifile), &
          fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile))
 
       ! all files must be the same mode
@@ -239,7 +236,7 @@ module  mod_goes_abi
          cycle file_loop1
       end if
 
-      if ( .not. ( is_BCM(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) & 
+      if ( .not. ( is_HSD(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) & 
                  .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
          ! id of the file name must match specified data_id
          if ( finfo /= data_id ) then
@@ -342,7 +339,7 @@ module  mod_goes_abi
          it = ftime_id(ifile)
          ib = fband_id(ifile)
 
-         if ( .not. ( is_BCM(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
+         if ( .not. ( is_HSD(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
 
             call read_GRB(ncid, nx, ny, rad_2d, bt_2d, qf_2d, sdtb, band_id, time_start(it))
 
@@ -378,8 +375,8 @@ module  mod_goes_abi
             F_out(1:nx,1:ny,ifile)=bt_2d(1:nx,1:ny)  !Brightness Temperature
             write(varname_out(ifile),"(A,I2.2)") 'BT_'//fsat_id//'C', fband_id(ifile)
 
-         elseif ( is_BCM(ifile) ) then
-            call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
+         elseif ( is_HSD(ifile) ) then
+            call read_L2_HSD(ncid, nx, ny, cm_2d, time_start(it))
             if ( time_start(it) /= scan_time(ifile) ) then
                write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
                cycle file_loop2
@@ -389,7 +386,7 @@ module  mod_goes_abi
 
             !BJJ copy to output array: use ifile index
             F_out(1:nx,1:ny,ifile)=cm_2d(1:nx,1:ny)
-            varname_out(ifile)='BCM_'//fsat_id
+            varname_out(ifile)='HSD_'//fsat_id
 
          elseif ( is_TEMP(ifile) ) then
             allocate (ctt_2d(nx, ny))   
@@ -490,7 +487,7 @@ module  mod_goes_abi
    deallocate(julianday)
    deallocate(fband_id)
    deallocate(valid)
-   deallocate(is_BCM)
+   deallocate(is_HSD)
    deallocate(is_TEMP) !BJJ
    deallocate(is_Phase) !BJJ
    deallocate(is_HT) !BJJ
@@ -757,7 +754,7 @@ subroutine read_GRB(ncid, nx, ny, rad, bt, qf, sd, band_id, time_start)
    return
 end subroutine read_GRB
 
-subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
+subroutine read_L2_HSD(ncid, nx, ny, cm, time_start)
    implicit none
    integer(i_kind),   intent(in)    :: ncid
    integer(i_kind),   intent(in)    :: nx, ny
@@ -795,7 +792,7 @@ subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
    istart(2) = 1
    icount(2) = ny
    allocate(itmp_byte_2d(nx,ny))
-   nf_status = nf_INQ_VARID(ncid, 'BCM', varid)
+   nf_status = nf_INQ_VARID(ncid, 'HSD', varid)
    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
    cm(:,:) = imiss
    do j = 1, ny
@@ -808,7 +805,7 @@ subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
    deallocate(itmp_byte_2d)
 
    return
-end subroutine read_L2_BCM
+end subroutine read_L2_HSD
 
 subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
    implicit none
@@ -1128,13 +1125,13 @@ subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
    return
 end subroutine read_L2_PRES
 
-subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
+subroutine decode_nc_fname(fname, finfo, scan_mode, is_HSD, is_TEMP, is_Phase, &
                            is_HT, is_PRES, band_id, sat_id, start_time, jday)
    implicit none
    character(len=*),  intent(in)  :: fname
    character(len=18), intent(out) :: finfo
    character(len=2),  intent(out) :: scan_mode
-   logical,           intent(out) :: is_BCM
+   logical,           intent(out) :: is_HSD
    logical,           intent(out) :: is_TEMP
    logical,           intent(out) :: is_Phase
    logical,           intent(out) :: is_HT
@@ -1145,8 +1142,8 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
    integer(i_kind),   intent(out) :: jday
    integer(i_kind) :: year, month, day, hour, minute, sec1, sec2
 
-   if ( fname( 1:14) == BCM_id ) then
-      is_BCM = .true.
+   if ( fname( 1:14) == HSD_id ) then
+      is_HSD = .true.
       band_id = -99
    else if ( fname( 1:15) == TEMP_id ) then
       is_TEMP = .true.
@@ -1161,7 +1158,7 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
       is_PRES = .true.
       band_id = -99
    else
-      is_BCM = .false.
+      is_HSD = .false.
       is_TEMP = .false.
       is_Phase = .false.
       is_HT = .false.
@@ -1171,7 +1168,7 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
    !CG_ABI-L2-ACMC-M3_G16_s20180351202275_e20180351205060_c20180351205106.nc
    !OR_ABI-L1b-RadC-M3C16_G16_s20172741802196_e20172741804580_c20172741805015.nc
    !1234567890123456789012345678901234567890123456789012345678901234567890123456
-   if ( .not. ( is_BCM .or. is_TEMP .or. is_Phase .or. is_HT .or. is_PRES ) ) then
+   if ( .not. ( is_HSD .or. is_TEMP .or. is_Phase .or. is_HT .or. is_PRES ) ) then
       read(fname( 1:18), '(a18)') finfo
       read(fname(17:18), '(a2)')  scan_mode
       read(fname(20:21), '(i2)')  band_id
@@ -1187,7 +1184,7 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_BCM, is_TEMP, is_Phase, &
       ! 2017-10-01T18:02:19.6Z
       write(start_time,'(i4.4,4(a,i2.2),a,i2.2,a,i1,a)') &
             year, '-', month, '-', day, 'T', hour, ':',  minute, ':', sec1, '.', sec2, 'Z'
-   else if ( is_BCM .or. is_PRES ) then
+   else if ( is_HSD .or. is_PRES ) then
    !OR_ABI-L2-ACMF-M3_G16_s20181050000419_e20181050011186_c20181050011347.nc
    !OR_ABI-L2-CTPF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
    !1234567890123456789012345678901234567890123456789012345678901234567890123456
@@ -1764,4 +1761,4 @@ subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq,
    return
 end subroutine calc_geostationary_satellite_zenith_angle
 
- end module mod_goes_abi
+ end module mod_himawari_ahi

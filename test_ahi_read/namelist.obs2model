@@ -1,6 +1,6 @@
 &data_nml
   nc_list_file = './flist.txt',
-  data_dir = '/glade/derecho/scratch/mrislam/work/pandac/data/himawari/2018/20180101/',   ! path of the GRB nc files
+  data_dir = '/glade/derecho/scratch/mrislam/work/pandac/data/himawari/2018/20180101/',   ! path of the HSD data files
   data_id = 'HS_H08', ! prefix of the downloaded HSD data files
   sat_id = 'H08',
   n_subsample = 1,

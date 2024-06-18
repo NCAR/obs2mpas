@@ -30,24 +30,24 @@ module  mod_himawari_ahi                                                        
    implicit none
    include 'netcdf.inc'
 
-   !BJJ moved to control_para module
-!   integer, parameter  :: r_single = selected_real_kind(6)  ! single precision
-!   integer, parameter  :: r_double = selected_real_kind(15) ! double precision
-!   integer, parameter  :: i_byte   = selected_int_kind(1)   ! byte integer
-!   integer, parameter  :: i_short  = selected_int_kind(4)   ! short integer
-!   integer, parameter  :: i_long   = selected_int_kind(8)   ! long integer
-!   integer, parameter  :: i_kind   = i_long                 ! default integer
-!   integer, parameter  :: r_kind   = r_single               ! default real
-!!BJJ   integer, parameter  :: r_kind   = r_double               ! default real
+! BJJ moved to control_para module
+!        integer, parameter  :: r_single = selected_real_kind(6)  ! single precision
+!        integer, parameter  :: r_double = selected_real_kind(15) ! double precision
+!        integer, parameter  :: i_byte   = selected_int_kind(1)   ! byte integer
+!        integer, parameter  :: i_short  = selected_int_kind(4)   ! short integer
+!        integer, parameter  :: i_long   = selected_int_kind(8)   ! long integer
+!        integer, parameter  :: i_kind   = i_long                 ! default integer
+!        integer, parameter  :: r_kind   = r_single               ! default real
+! BJJ    integer, parameter  :: r_kind   = r_double               ! default real
 
    ! prefix of Clear Sky Mask (Binary Cloud Mask) output of cspp-geo-aitf package
    character(len=14), parameter :: HSD_id   = 'HS_H08'
-   character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'
-   character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'
-   character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'
-   character(len=14), parameter :: PRES_id  = 'OR_ABI-L2-CTPF'
+   ! character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'    !MRI commented out initially 
+   ! character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'    !MRI commented out initially
+   ! character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'    !MRI commented out initially
+   ! character(len=14), parameter :: PRES_id  = 'OR_ABI-L2-CTPF'     !MRI commented out initially
 
-   integer(i_kind), parameter :: nband      = 10  ! IR bands 7-16
+   integer(i_kind), parameter :: nband      = 10  ! IR bands 7-16    ! MRI - checked and found the same for AHI
    integer(i_kind) :: band_start = 7
    integer(i_kind) :: band_end   = 16
 
@@ -65,10 +65,10 @@ module  mod_himawari_ahi                                                        
             ! qf (DQF, Data Quality Flag)
             ! 0:good, 1:conditionally_usable, 2:out_of_range, 3:no_value
    integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
-   real(r_kind),    allocatable :: ctt_2d(:,:)  ! cloud top temperature(nx,ny) !BJJ
-   real(r_kind),    allocatable :: ctph_2d(:,:) ! cloud top phase(nx,ny) !BJJ
-   real(r_kind),    allocatable :: cth_2d(:,:)  ! cloud top height(nx,ny) !BJJ
-   real(r_kind),    allocatable :: ctp_2d(:,:)  ! cloud top pressure(nx,ny) !BJJ
+   ! real(r_kind),    allocatable :: ctt_2d(:,:)  ! cloud top temperature(nx,ny) !BJJ     !MRI commented out initially
+   ! real(r_kind),    allocatable :: ctph_2d(:,:) ! cloud top phase(nx,ny) !BJJ           !MRI commented out initially
+   ! real(r_kind),    allocatable :: cth_2d(:,:)  ! cloud top height(nx,ny) !BJJ          !MRI commented out initially
+   ! real(r_kind),    allocatable :: ctp_2d(:,:)  ! cloud top pressure(nx,ny) !BJJ        !MRI commented out initially
 
    type rad_type
       real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
@@ -91,14 +91,14 @@ module  mod_himawari_ahi                                                        
    integer(i_kind)      :: nml_unit = 81
    integer(i_kind)      :: iunit    = 87
    
-   character(len=256)              :: nc_list_file  ! the text file that contains a list of netcdf files to process
+   character(len=256)              :: hsd_list_file  ! the text file that contains a list of HSD files to process       ! modified by MRI  
    character(len=256)              :: data_dir
    character(len=18)               :: data_id
    character(len=3)                :: sat_id
    integer(i_kind)                 :: n_subsample
    logical                         :: write_iodav1
 
-   namelist /data_nml/ nc_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1
+   namelist /data_nml/ hsd_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1
 
    real(r_kind)                    :: sdtb ! to be done
    integer(i_kind)                 :: istat
@@ -106,8 +106,9 @@ module  mod_himawari_ahi                                                        
    logical                         :: isfile
    logical                         :: found_time
    logical                         :: got_grid_info
-   logical, allocatable            :: valid(:), is_HSD(:), is_TEMP(:), is_Phase(:), is_HT(:), is_PRES(:)
-   character(len=256), allocatable :: nc_fnames(:)
+   ! logical, allocatable            :: valid(:), is_BCM(:), is_TEMP(:), is_Phase(:), is_HT(:), is_PRES(:)           ! original
+   logical, allocatable            :: valid(:), is_HSD(:) !  modification by MRI 
+   character(len=256), allocatable :: hsd_fnames(:)
    character(len=256)              :: fname
    character(len=256)              :: out_fname
    character(len=256)              :: txtbuf
@@ -122,7 +123,7 @@ module  mod_himawari_ahi                                                        
    contains
 
 
-   subroutine Goes_ReBroadcast_converter (glon_out, glat_out, F_out, varname_out, got_latlon_out)
+   subroutine Himawari_AHI_converter (glon_out, glat_out, F_out, varname_out, got_latlon_out)                  ! MRI TODO - make adjustments so that it can be used for HSD
 
    implicit none
    real(r_kind),      allocatable, intent(out) :: glon_out(:,:)
@@ -139,10 +140,10 @@ module  mod_himawari_ahi                                                        
    !
    ! initialize namelist variables
    !
-   nc_list_file      = 'flist.txt'
+   hsd_list_file      = 'flist.txt'
    data_dir          = '.'
-   data_id           = 'OR_ABI-L1b-RadC-M3'
-   sat_id            = 'G16'
+   data_id           = 'HS_H08'
+   sat_id            = 'H08'
    n_subsample       = 1
    !
    write_iodav1      = .false.
@@ -157,14 +158,14 @@ module  mod_himawari_ahi                                                        
       stop
    end if
 
-   ! get file names from nc_list_file
+   ! get file names from hsd_list_file
    nfile  = 0  ! initialize the number of netcdf files to read
-   inquire(file=trim(nc_list_file), exist=isfile)
+   inquire(file=trim(hsd_list_file), exist=isfile)
    if ( .not. isfile ) then
-      write(0,*) 'File not found: nc_list_file '//trim(nc_list_file)
+      write(0,*) 'File not found: hsd_list_file '//trim(hsd_list_file)
       stop 1
    else
-      open(unit=iunit, file=trim(nc_list_file), status='old', form='formatted')
+      open(unit=iunit, file=trim(hsd_list_file), status='old', form='formatted')
       !first find out the number of netcdf files to read
       istat = 0
       do while ( istat == 0 )
@@ -176,18 +177,18 @@ module  mod_himawari_ahi                                                        
          end if
       end do
       if ( nfile > 0 ) then
-         allocate (nc_fnames(nfile))
-         !read the nc_list_file again to get the netcdf file names
+         allocate (hsd_fnames(nfile))                                       ! MRI TODO - change it from NC to HSD
+         !read the hsd_list_file again to get the netcdf file names
          rewind(iunit)
          do ifile = 1, nfile
-            read(unit=iunit, fmt='(a)', iostat=istat) nc_fnames(ifile)
+            read(unit=iunit, fmt='(a)', iostat=istat) hsd_fnames(ifile)     ! MRI TODO - change it from NC to HSD
          end do
       else
-         write(0,*) 'File not found from nc_list_file '//trim(nc_list_file)
+         write(0,*) 'File not found from hsd_list_file '//trim(hsd_list_file)
          stop
       end if
       close(iunit)
-   end if !nc_list_file
+   end if !hsd_list_file
 
    allocate (ftime_id(nfile))
    allocate (scan_time(nfile))
@@ -195,16 +196,16 @@ module  mod_himawari_ahi                                                        
    allocate (fband_id(nfile))
    allocate (valid(nfile))
    allocate (is_HSD(nfile))
-   allocate (is_TEMP(nfile)) !BJJ
-   allocate (is_Phase(nfile)) !BJJ
-   allocate (is_HT(nfile)) !BJJ
-   allocate (is_PRES(nfile)) !BJJ
+   ! allocate (is_TEMP(nfile)) !BJJ       !MRI commented out initially
+   ! allocate (is_Phase(nfile)) !BJJ      !MRI commented out initially
+   ! allocate (is_HT(nfile)) !BJJ         !MRI commented out initially
+   ! allocate (is_PRES(nfile)) !BJJ       !MRI commented out initially
    valid( :) = .false.
    is_HSD(:) = .false.
-   is_TEMP(:) = .false.
-   is_Phase(:) = .false.
-   is_HT(:) = .false.
-   is_PRES(:) = .false.
+   ! is_TEMP(:) = .false.                 !MRI commented out initially
+   ! is_Phase(:) = .false.                !MRI commented out initially
+   ! is_HT(:) = .false.                   !MRI commented out initially
+   ! is_PRES(:) = .false.                 !MRI commented out initially
 
    nlen = len_trim(data_id)
    mode_id = data_id(nlen-1:nlen)
@@ -213,7 +214,7 @@ module  mod_himawari_ahi                                                        
    t_index = 0
    file_loop1: do ifile = 1, nfile
 
-      fname = trim(data_dir)//'/'//trim(nc_fnames(ifile))
+      fname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
       inquire(file=trim(fname), exist=isfile)
       if ( .not. isfile ) then
          write(0,*) 'File not found: '//trim(fname)
@@ -222,10 +223,14 @@ module  mod_himawari_ahi                                                        
          write(0,*) 'File found: '//trim(fname)         
       end if
 
+      ! ! retrieve some basic info from the netcdf filename itself
+      ! call decode_hsd_fname(trim(hsd_fnames(ifile)),finfo, scan_mode, &                      ! original
+      !    is_HSD(ifile), is_TEMP(ifile), is_Phase(ifile), is_HT(ifile), is_PRES(ifile), &
+      !    fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile))
+
       ! retrieve some basic info from the netcdf filename itself
-      call decode_nc_fname(trim(nc_fnames(ifile)),finfo, scan_mode, &
-         is_HSD(ifile), is_TEMP(ifile), is_Phase(ifile), is_HT(ifile), is_PRES(ifile), &
-         fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile))
+      call decode_hsd_fname(trim(hsd_fnames(ifile)),finfo, scan_mode, &                        ! modified by MRI
+         is_HSD(ifile), fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile))
 
       ! all files must be the same mode
       if ( scan_mode /= mode_id ) then
@@ -236,8 +241,11 @@ module  mod_himawari_ahi                                                        
          cycle file_loop1
       end if
 
-      if ( .not. ( is_HSD(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) & 
-                 .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
+      ! if ( .not. ( is_HSD(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) &                   ! original
+      !            .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
+
+      if ( .not. ( is_HSD(ifile) ) ) then                                                       ! modified by MRI
+
          ! id of the file name must match specified data_id
          if ( finfo /= data_id ) then
             cycle file_loop1
@@ -278,7 +286,7 @@ module  mod_himawari_ahi                                                        
 
    if ( ntime <= 0 ) then
       write(0,*) 'ntime = ', ntime
-      write(0,*) 'No valid files found from nc_list_file '//trim(nc_list_file)
+      write(0,*) 'No valid files found from hsd_list_file '//trim(hsd_list_file)
       stop
    end if
 
@@ -290,7 +298,7 @@ module  mod_himawari_ahi                                                        
 
       if ( valid(ifile) ) then
 
-         fname = trim(data_dir)//'/'//trim(nc_fnames(ifile))
+         fname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
          nf_status = nf_OPEN(trim(fname), nf_NOWRITE, ncid)
          if ( nf_status == 0 ) then
             write(0,*) 'Reading '//trim(fname)
@@ -300,7 +308,7 @@ module  mod_himawari_ahi                                                        
          end if
 
          if ( .not. got_grid_info ) then
-            call read_GRB_dims(ncid, nx, ny)
+            call read_GRB_dims(ncid, nx, ny)                                                    ! MRI TODO - make adjustments for HSD
             allocate (glat(nx, ny))
             allocate (glon(nx, ny))
             allocate (gzen(nx, ny))
@@ -321,7 +329,7 @@ module  mod_himawari_ahi                                                        
             F_out(:,:,:) = missing_r
             varname_out = ''
             write(0,*) 'Calculating lat/lon from fixed grid x/y...'
-            call read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)
+            call read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)                     ! MRI TODO - make adjustments for HSD
             call calc_solar_zenith_angle(nx, ny, glat, glon, scan_time(ifile), julianday(ifile), solzen, got_latlon)
             ! additional info for writing ioda at MPAS mesh !BJJ
             write(15,*) ifile, scan_time(ifile), julianday(ifile)
@@ -339,9 +347,11 @@ module  mod_himawari_ahi                                                        
          it = ftime_id(ifile)
          ib = fband_id(ifile)
 
-         if ( .not. ( is_HSD(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then
+         ! if ( .not. ( is_HSD(ifile) .or. is_TEMP(ifile) .or. is_Phase(ifile) .or. is_HT(ifile) .or. is_PRES(ifile) ) ) then              ! original
 
-            call read_GRB(ncid, nx, ny, rad_2d, bt_2d, qf_2d, sdtb, band_id, time_start(it))
+         if ( .not. ( is_HSD(ifile) ) ) then                                                                                               ! modified by MRI
+
+            call read_GRB(ncid, nx, ny, rad_2d, bt_2d, qf_2d, sdtb, band_id, time_start(it))                                               ! MRI TODO - make adjustments for HSD
 
             if ( band_id /= ib ) then
                write(0,*) 'ERROR: band_id from the file name and the file content do not match.'
@@ -376,7 +386,7 @@ module  mod_himawari_ahi                                                        
             write(varname_out(ifile),"(A,I2.2)") 'BT_'//fsat_id//'C', fband_id(ifile)
 
          elseif ( is_HSD(ifile) ) then
-            call read_L2_HSD(ncid, nx, ny, cm_2d, time_start(it))
+            call read_L1_HSD(ncid, nx, ny, cm_2d, time_start(it))
             if ( time_start(it) /= scan_time(ifile) ) then
                write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
                cycle file_loop2
@@ -388,60 +398,60 @@ module  mod_himawari_ahi                                                        
             F_out(1:nx,1:ny,ifile)=cm_2d(1:nx,1:ny)
             varname_out(ifile)='HSD_'//fsat_id
 
-         elseif ( is_TEMP(ifile) ) then
-            allocate (ctt_2d(nx, ny))   
-            call read_L2_TEMP(ncid, nx, ny, ctt_2d, time_start(it))
-            if ( time_start(it) /= scan_time(ifile) ) then
-               write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
-               cycle file_loop2
-            end if
-            !BJJ copy to output array: use ifile index
-            F_out(1:nx,1:ny,ifile)=ctt_2d(1:nx,1:ny)
-            varname_out(ifile)='TEMP_'//fsat_id
-            deallocate (ctt_2d)
+         ! elseif ( is_TEMP(ifile) ) then                                  !MRI commented out initially 
+         !    allocate (ctt_2d(nx, ny))   
+         !    call read_L2_TEMP(ncid, nx, ny, ctt_2d, time_start(it))
+         !    if ( time_start(it) /= scan_time(ifile) ) then
+         !       write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
+         !       cycle file_loop2
+         !    end if
+         !    !BJJ copy to output array: use ifile index
+         !    F_out(1:nx,1:ny,ifile)=ctt_2d(1:nx,1:ny)
+         !    varname_out(ifile)='TEMP_'//fsat_id
+         !    deallocate (ctt_2d)
             
-         elseif ( is_Phase(ifile) ) then
-            allocate (ctph_2d(nx, ny))
-            call read_L2_Phase(ncid, nx, ny, ctph_2d, time_start(it))
-            if ( time_start(it) /= scan_time(ifile) ) then
-               write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
-               cycle file_loop2
-            end if
-            !BJJ copy to output array: use ifile index
-            F_out(1:nx,1:ny,ifile)=ctph_2d(1:nx,1:ny)
-            varname_out(ifile)='Phase_'//fsat_id
-            deallocate (ctph_2d)
+         ! elseif ( is_Phase(ifile) ) then                                  !MRI commented out initially 
+         !    allocate (ctph_2d(nx, ny))
+         !    call read_L2_Phase(ncid, nx, ny, ctph_2d, time_start(it))
+         !    if ( time_start(it) /= scan_time(ifile) ) then
+         !       write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
+         !       cycle file_loop2
+         !    end if
+         !    !BJJ copy to output array: use ifile index
+         !    F_out(1:nx,1:ny,ifile)=ctph_2d(1:nx,1:ny)
+         !    varname_out(ifile)='Phase_'//fsat_id
+         !    deallocate (ctph_2d)
 
-         elseif ( is_HT(ifile) ) then
-            allocate (cth_2d(nx, ny))
-            call read_L2_HT(ncid, nx, ny, cth_2d, time_start(it))
-            if ( time_start(it) /= scan_time(ifile) ) then
-               write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
-               cycle file_loop2
-            end if
-            !BJJ copy to output array: use ifile index
-            F_out(1:nx,1:ny,ifile)=cth_2d(1:nx,1:ny)
-            varname_out(ifile)='HT_'//fsat_id
-            deallocate (cth_2d)
+         ! elseif ( is_HT(ifile) ) then                                  !MRI commented out initially 
+         !    allocate (cth_2d(nx, ny))
+         !    call read_L2_HT(ncid, nx, ny, cth_2d, time_start(it))
+         !    if ( time_start(it) /= scan_time(ifile) ) then
+         !       write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
+         !       cycle file_loop2
+         !    end if
+         !    !BJJ copy to output array: use ifile index
+         !    F_out(1:nx,1:ny,ifile)=cth_2d(1:nx,1:ny)
+         !    varname_out(ifile)='HT_'//fsat_id
+         !    deallocate (cth_2d)
 
-         elseif ( is_PRES(ifile) ) then
-            allocate (ctp_2d(nx, ny))   
-            call read_L2_PRES(ncid, nx, ny, ctp_2d, time_start(it))
-            if ( time_start(it) /= scan_time(ifile) ) then
-               write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
-               cycle file_loop2
-            end if
-            !BJJ copy to output array: use ifile index
-            F_out(1:nx,1:ny,ifile)=ctp_2d(1:nx,1:ny)
-            varname_out(ifile)='PRES_'//fsat_id
-            deallocate (ctp_2d)
+         ! elseif ( is_PRES(ifile) ) then                                  !MRI commented out initially 
+         !    allocate (ctp_2d(nx, ny))   
+         !    call read_L2_PRES(ncid, nx, ny, ctp_2d, time_start(it))
+         !    if ( time_start(it) /= scan_time(ifile) ) then
+         !       write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
+         !       cycle file_loop2
+         !    end if
+         !    !BJJ copy to output array: use ifile index
+         !    F_out(1:nx,1:ny,ifile)=ctp_2d(1:nx,1:ny)
+         !    varname_out(ifile)='PRES_'//fsat_id
+         !    deallocate (ctp_2d)
             
          else
             write(0,*) 'ERROR: something is wrong. check the files'
             stop
          end if         
 
-         nf_status = nf_CLOSE(ncid)
+         nf_status = nf_CLOSE(ncid)                                        ! MRI TODO - make adjustments for HSD
 
       end if
 
@@ -481,22 +491,22 @@ module  mod_himawari_ahi                                                        
    deallocate(rdata)
    deallocate(time_start)
 
-   deallocate(nc_fnames)
+   deallocate(hsd_fnames)
    deallocate(ftime_id)
    deallocate(scan_time)
    deallocate(julianday)
    deallocate(fband_id)
    deallocate(valid)
    deallocate(is_HSD)
-   deallocate(is_TEMP) !BJJ
-   deallocate(is_Phase) !BJJ
-   deallocate(is_HT) !BJJ
-   deallocate(is_PRES) !BJJ
+   ! deallocate(is_TEMP) !BJJ          !MRI commented out initially 
+   ! deallocate(is_Phase) !BJJ         !MRI commented out initially 
+   ! deallocate(is_HT) !BJJ            !MRI commented out initially 
+   ! deallocate(is_PRES) !BJJ          !MRI commented out initially 
 
- end subroutine Goes_ReBroadcast_converter
+ end subroutine Himawari_AHI_converter
 
  
-subroutine read_GRB_dims(ncid, nx, ny)
+subroutine read_GRB_dims(ncid, nx, ny)                                        ! MRI TODO - make adjustments so that it can be used for HSD
    implicit none
    integer(i_kind), intent(in)  :: ncid
    integer(i_kind), intent(out) :: nx, ny
@@ -520,7 +530,7 @@ end subroutine read_GRB_dims
 !NC_FLOAT 32-bit floating point
 !NC_DOUBLE 64-bit floating point
 
-subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)
+subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)          ! MRI TODO - make adjustments so that it can be used for HSD
    implicit none
    integer(i_kind), intent(in)    :: ncid
    integer(i_kind), intent(in)    :: nx, ny
@@ -651,7 +661,7 @@ subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)
    return
 end subroutine read_GRB_grid
 
-subroutine read_GRB(ncid, nx, ny, rad, bt, qf, sd, band_id, time_start)
+subroutine read_GRB(ncid, nx, ny, rad, bt, qf, sd, band_id, time_start)                                        ! MRI TODO - make adjustments for HSD format data reading
    implicit none
    integer(i_kind),   intent(in)    :: ncid
    integer(i_kind),   intent(in)    :: nx, ny
@@ -754,7 +764,7 @@ subroutine read_GRB(ncid, nx, ny, rad, bt, qf, sd, band_id, time_start)
    return
 end subroutine read_GRB
 
-subroutine read_L2_HSD(ncid, nx, ny, cm, time_start)
+subroutine read_L1_HSD(ncid, nx, ny, cm, time_start)                     ! MRI TODO - adjust this section in a way that is applicable to HSD data. ref: existing code (hsd.F90 in obs2ioda)
    implicit none
    integer(i_kind),   intent(in)    :: ncid
    integer(i_kind),   intent(in)    :: nx, ny
@@ -805,337 +815,336 @@ subroutine read_L2_HSD(ncid, nx, ny, cm, time_start)
    deallocate(itmp_byte_2d)
 
    return
-end subroutine read_L2_HSD
+end subroutine read_L1_HSD
 
-subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
-   implicit none
-   integer(i_kind),   intent(in)    :: ncid
-   integer(i_kind),   intent(in)    :: nx, ny
-   real(r_kind),      intent(inout) :: ctt(nx,ny)
-   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
-   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
-   integer(i_short), allocatable    :: itmp_short_2d(:,:)
-   integer(i_kind),  allocatable    :: itmp_2d(:,:)
-   integer(i_kind)                  :: nf_status
-   integer(i_kind)                  :: istart(2), icount(2)
-   integer(i_kind)                  :: varid, i, j
-   integer(i_short)                 :: ifill
-   integer(i_kind)                  :: imiss = -999
-   integer(i_kind)                  :: rmiss = -999.0
-   real(r_single)                   :: scalef, offset
-   integer(i_kind)                  :: qf(nx,ny)
-   character(len=4)                 :: l_unsigned
-   continue
+! subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)                         ! MRI commented out because we are not using TEMP at the moment
+!    implicit none
+!    integer(i_kind),   intent(in)    :: ncid
+!    integer(i_kind),   intent(in)    :: nx, ny
+!    real(r_kind),      intent(inout) :: ctt(nx,ny)
+!    character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+!    integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+!    integer(i_short), allocatable    :: itmp_short_2d(:,:)
+!    integer(i_kind),  allocatable    :: itmp_2d(:,:)
+!    integer(i_kind)                  :: nf_status
+!    integer(i_kind)                  :: istart(2), icount(2)
+!    integer(i_kind)                  :: varid, i, j
+!    integer(i_short)                 :: ifill
+!    integer(i_kind)                  :: imiss = -999
+!    integer(i_kind)                  :: rmiss = -999.0
+!    real(r_single)                   :: scalef, offset
+!    integer(i_kind)                  :: qf(nx,ny)
+!    character(len=4)                 :: l_unsigned
+!    continue
 
-   ! time_start is the same for all bands, but time_end is not
-   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! time_start is the same for all bands, but time_end is not
+!    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_byte_2d(nx,ny))
-   nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
-   qf(:,:) = imiss
-   do j = 1, ny
-      do i = 1, nx
-         qf(i,j) = itmp_byte_2d(i,j)
-      end do
-   end do
-   deallocate(itmp_byte_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_byte_2d(nx,ny))
+!    nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
+!    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+!    qf(:,:) = imiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          qf(i,j) = itmp_byte_2d(i,j)
+!       end do
+!    end do
+!    deallocate(itmp_byte_2d)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_short_2d(nx, ny))
-   nf_status = nf_INQ_VARID(ncid, 'TEMP', varid)
-   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
-   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
-   nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
-   if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
-   ! convert unsigned short to signed short
-   if( l_unsigned == "true" ) then
-      allocate(itmp_2d(nx,ny))
-      itmp_2d = itmp_short_2d
-      do j = 1, ny
-         do i = 1, nx
-            if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
-               itmp_2d(i,j) = itmp_2d(i,j) + 65536
-            end if
-         end do
-      end do
-   end if
-   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_short_2d(nx, ny))
+!    nf_status = nf_INQ_VARID(ncid, 'TEMP', varid)
+!    nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+!    nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+!    nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
+!    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
+!    ! convert unsigned short to signed short
+!    if( l_unsigned == "true" ) then
+!       allocate(itmp_2d(nx,ny))
+!       itmp_2d = itmp_short_2d
+!       do j = 1, ny
+!          do i = 1, nx
+!             if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
+!                itmp_2d(i,j) = itmp_2d(i,j) + 65536
+!             end if
+!          end do
+!       end do
+!    end if
+!    !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+!    !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
-   ctt(:,:) = rmiss
-   do j = 1, ny
-      do i = 1, nx
-         if ( itmp_short_2d(i,j) /= ifill ) then
-            if (qf(i,j) == 0 ) then ! good quality
-               if( l_unsigned == "true" ) then
-                  ctt(i,j) = offset + itmp_2d(i,j) * scalef
-               else
-                  ctt(i,j) = offset + itmp_short_2d(i,j) * scalef
-               end if
-            end if
-         end if
-      end do
-   end do
-   !write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
-   deallocate(itmp_short_2d)
-   if( allocated(itmp_2d) ) deallocate(itmp_2d)
+!    ctt(:,:) = rmiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          if ( itmp_short_2d(i,j) /= ifill ) then
+!             if (qf(i,j) == 0 ) then ! good quality
+!                if( l_unsigned == "true" ) then
+!                   ctt(i,j) = offset + itmp_2d(i,j) * scalef
+!                else
+!                   ctt(i,j) = offset + itmp_short_2d(i,j) * scalef
+!                end if
+!             end if
+!          end if
+!       end do
+!    end do
+!    !write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
+!    deallocate(itmp_short_2d)
+!    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
-   return
-end subroutine read_L2_TEMP
+!    return
+! end subroutine read_L2_TEMP
 
-subroutine read_L2_Phase(ncid, nx, ny, ctph, time_start)
-   implicit none
-   integer(i_kind),   intent(in)    :: ncid
-   integer(i_kind),   intent(in)    :: nx, ny
-   real(r_kind),      intent(inout) :: ctph(nx,ny)
-   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
-   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
-   integer(i_kind)                  :: nf_status
-   integer(i_kind)                  :: istart(2), icount(2)
-   integer(i_kind)                  :: varid, i, j
-   integer(i_kind)                  :: imiss = -999
-   integer(i_kind)                  :: rmiss = -999.0
-   integer(i_kind)                  :: qf(nx,ny)
-   continue
+! subroutine read_L2_Phase(ncid, nx, ny, ctph, time_start)              ! MRI commented out because we are not using L2_Phase at the moment
+!    implicit none
+!    integer(i_kind),   intent(in)    :: ncid
+!    integer(i_kind),   intent(in)    :: nx, ny
+!    real(r_kind),      intent(inout) :: ctph(nx,ny)
+!    character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+!    integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+!    integer(i_kind)                  :: nf_status
+!    integer(i_kind)                  :: istart(2), icount(2)
+!    integer(i_kind)                  :: varid, i, j
+!    integer(i_kind)                  :: imiss = -999
+!    integer(i_kind)                  :: rmiss = -999.0
+!    integer(i_kind)                  :: qf(nx,ny)
+!    continue
 
-   ! time_start is the same for all bands, but time_end is not
-   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! time_start is the same for all bands, but time_end is not
+!    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_byte_2d(nx,ny))
-   nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
-   qf(:,:) = imiss
-   do j = 1, ny
-      do i = 1, nx
-         qf(i,j) = itmp_byte_2d(i,j)
-      end do
-   end do
-   deallocate(itmp_byte_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_byte_2d(nx,ny))
+!    nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
+!    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+!    qf(:,:) = imiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          qf(i,j) = itmp_byte_2d(i,j)
+!       end do
+!    end do
+!    deallocate(itmp_byte_2d)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_byte_2d(nx,ny))
-   nf_status = nf_INQ_VARID(ncid, 'Phase', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
-   ctph(:,:) = rmiss
-   do j = 1, ny
-      do i = 1, nx
-         if ( qf(i,j) == 0 ) then ! good quality
-            ctph(i,j) = itmp_byte_2d(i,j)
-         end if
-      end do
-   end do
-   deallocate(itmp_byte_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_byte_2d(nx,ny))
+!    nf_status = nf_INQ_VARID(ncid, 'Phase', varid)
+!    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+!    ctph(:,:) = rmiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          if ( qf(i,j) == 0 ) then ! good quality
+!             ctph(i,j) = itmp_byte_2d(i,j)
+!          end if
+!       end do
+!    end do
+!    deallocate(itmp_byte_2d)
 
-   return
-end subroutine read_L2_Phase
+!    return
+! end subroutine read_L2_Phase
 
-subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
-   implicit none
-   integer(i_kind),   intent(in)    :: ncid
-   integer(i_kind),   intent(in)    :: nx, ny
-   real(r_kind),      intent(inout) :: cth(nx,ny)
-   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
-   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
-   integer(i_short), allocatable    :: itmp_short_2d(:,:)
-   integer(i_kind),  allocatable    :: itmp_2d(:,:)
-   integer(i_kind)                  :: nf_status
-   integer(i_kind)                  :: istart(2), icount(2)
-   integer(i_kind)                  :: varid, i, j
-   integer(i_short)                 :: ifill
-   integer(i_kind)                  :: imiss = -999
-   integer(i_kind)                  :: rmiss = -999.0
-   real(r_single)                   :: scalef, offset
-   integer(i_kind)                  :: qf(nx,ny)
-   character(len=4)                 :: l_unsigned
-   continue
+! subroutine read_L2_HT(ncid, nx, ny, cth, time_start)                  ! MRI commented out because we are not using HT at the moment
+!    implicit none
+!    integer(i_kind),   intent(in)    :: ncid
+!    integer(i_kind),   intent(in)    :: nx, ny
+!    real(r_kind),      intent(inout) :: cth(nx,ny)
+!    character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+!    integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+!    integer(i_short), allocatable    :: itmp_short_2d(:,:)
+!    integer(i_kind),  allocatable    :: itmp_2d(:,:)
+!    integer(i_kind)                  :: nf_status
+!    integer(i_kind)                  :: istart(2), icount(2)
+!    integer(i_kind)                  :: varid, i, j
+!    integer(i_short)                 :: ifill
+!    integer(i_kind)                  :: imiss = -999
+!    integer(i_kind)                  :: rmiss = -999.0
+!    real(r_single)                   :: scalef, offset
+!    integer(i_kind)                  :: qf(nx,ny)
+!    character(len=4)                 :: l_unsigned
+!    continue
 
-   ! time_start is the same for all bands, but time_end is not
-   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! time_start is the same for all bands, but time_end is not
+!    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_byte_2d(nx,ny))
-   nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
-   qf(:,:) = imiss
-   do j = 1, ny
-      do i = 1, nx
-         qf(i,j) = itmp_byte_2d(i,j)
-      end do
-   end do
-   deallocate(itmp_byte_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_byte_2d(nx,ny))
+!    nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
+!    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+!    qf(:,:) = imiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          qf(i,j) = itmp_byte_2d(i,j)
+!       end do
+!    end do
+!    deallocate(itmp_byte_2d)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_short_2d(nx, ny))
-   nf_status = nf_INQ_VARID(ncid, 'HT', varid)
-   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
-   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
-   nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
-   if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned 
-   ! convert unsigned short to signed short
-   if( l_unsigned == "true" ) then
-      allocate(itmp_2d(nx,ny))
-      itmp_2d = itmp_short_2d
-      do j = 1, ny
-         do i = 1, nx
-            if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
-               itmp_2d(i,j) = itmp_2d(i,j) + 65536
-            end if
-         end do
-      end do
-   end if
-   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_short_2d(nx, ny))
+!    nf_status = nf_INQ_VARID(ncid, 'HT', varid)
+!    nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+!    nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+!    nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
+!    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned 
+!    ! convert unsigned short to signed short
+!    if( l_unsigned == "true" ) then
+!       allocate(itmp_2d(nx,ny))
+!       itmp_2d = itmp_short_2d
+!       do j = 1, ny
+!          do i = 1, nx
+!             if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
+!                itmp_2d(i,j) = itmp_2d(i,j) + 65536
+!             end if
+!          end do
+!       end do
+!    end if
+!    !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+!    !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
-   cth(:,:) = rmiss
-   do j = 1, ny
-      do i = 1, nx
-         if ( itmp_short_2d(i,j) /= ifill ) then
-            if (qf(i,j) == 0 ) then ! good quality
-               if( l_unsigned == "true" ) then
-                  cth(i,j) = offset + itmp_2d(i,j) * scalef
-               else
-                  cth(i,j) = offset + itmp_short_2d(i,j) * scalef
-               end if
-            end if
-         end if
-      end do
-   end do
-   !write(*,*) "min/max of cth =", minval(cth), maxval(cth)
-   deallocate(itmp_short_2d)
-   if( allocated(itmp_2d) ) deallocate(itmp_2d)
+!    cth(:,:) = rmiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          if ( itmp_short_2d(i,j) /= ifill ) then
+!             if (qf(i,j) == 0 ) then ! good quality
+!                if( l_unsigned == "true" ) then
+!                   cth(i,j) = offset + itmp_2d(i,j) * scalef
+!                else
+!                   cth(i,j) = offset + itmp_short_2d(i,j) * scalef
+!                end if
+!             end if
+!          end if
+!       end do
+!    end do
+!    !write(*,*) "min/max of cth =", minval(cth), maxval(cth)
+!    deallocate(itmp_short_2d)
+!    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
-   return
-end subroutine read_L2_HT
+!    return
+! end subroutine read_L2_HT
 
-subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
-   implicit none
-   integer(i_kind),   intent(in)    :: ncid
-   integer(i_kind),   intent(in)    :: nx, ny
-   real(r_kind),      intent(inout) :: ctp(nx,ny)
-   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
-   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
-   integer(i_short), allocatable    :: itmp_short_2d(:,:)
-   integer(i_kind),  allocatable    :: itmp_2d(:,:)
-   integer(i_kind)                  :: nf_status
-   integer(i_kind)                  :: istart(2), icount(2)
-   integer(i_kind)                  :: varid, i, j
-   integer(i_short)                 :: ifill
-   integer(i_kind)                  :: imiss = -999
-   integer(i_kind)                  :: rmiss = -999.0
-   real(r_single)                   :: scalef, offset
-   integer(i_kind)                  :: qf(nx,ny)
-   character(len=4)                 :: l_unsigned
-   continue
+! subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)                   ! MRI commented out because we are not using PRES at the moment
+!    implicit none
+!    integer(i_kind),   intent(in)    :: ncid
+!    integer(i_kind),   intent(in)    :: nx, ny
+!    real(r_kind),      intent(inout) :: ctp(nx,ny)
+!    character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+!    integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+!    integer(i_short), allocatable    :: itmp_short_2d(:,:)
+!    integer(i_kind),  allocatable    :: itmp_2d(:,:)
+!    integer(i_kind)                  :: nf_status
+!    integer(i_kind)                  :: istart(2), icount(2)
+!    integer(i_kind)                  :: varid, i, j
+!    integer(i_short)                 :: ifill
+!    integer(i_kind)                  :: imiss = -999
+!    integer(i_kind)                  :: rmiss = -999.0
+!    real(r_single)                   :: scalef, offset
+!    integer(i_kind)                  :: qf(nx,ny)
+!    character(len=4)                 :: l_unsigned
+!    continue
 
-   ! time_start is the same for all bands, but time_end is not
-   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! time_start is the same for all bands, but time_end is not
+!    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_byte_2d(nx,ny))
-   nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
-   qf(:,:) = imiss
-   do j = 1, ny
-      do i = 1, nx
-         qf(i,j) = itmp_byte_2d(i,j)
-      end do
-   end do
-   deallocate(itmp_byte_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_byte_2d(nx,ny))
+!    nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
+!    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+!    qf(:,:) = imiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          qf(i,j) = itmp_byte_2d(i,j)
+!       end do
+!    end do
+!    deallocate(itmp_byte_2d)
 
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_short_2d(nx, ny))
-   nf_status = nf_INQ_VARID(ncid, 'PRES', varid)
-   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
-   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
-   nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
-   if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
-   ! convert unsigned short to signed short
-   if( l_unsigned == "true" ) then
-      allocate(itmp_2d(nx,ny))
-      itmp_2d = itmp_short_2d
-      do j = 1, ny
-         do i = 1, nx
-            if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
-               itmp_2d(i,j) = itmp_2d(i,j) + 65536
-            end if
-         end do
-      end do
-   end if
-   !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-   !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_short_2d(nx, ny))
+!    nf_status = nf_INQ_VARID(ncid, 'PRES', varid)
+!    nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+!    nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+!    nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
+!    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
+!    ! convert unsigned short to signed short
+!    if( l_unsigned == "true" ) then
+!       allocate(itmp_2d(nx,ny))
+!       itmp_2d = itmp_short_2d
+!       do j = 1, ny
+!          do i = 1, nx
+!             if ( itmp_short_2d(i,j) .lt. 0_i_short ) then
+!                itmp_2d(i,j) = itmp_2d(i,j) + 65536
+!             end if
+!          end do
+!       end do
+!    end if
+!    !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+!    !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
-   ctp(:,:) = rmiss
-   do j = 1, ny
-      do i = 1, nx
-         if ( itmp_short_2d(i,j) /= ifill ) then
-            if (qf(i,j) == 0 ) then ! good quality
-               if( l_unsigned == "true" ) then
-                  ctp(i,j) = offset + itmp_2d(i,j) * scalef
-               else
-                  ctp(i,j) = offset + itmp_short_2d(i,j) * scalef
-               end if
-            end if
-         end if
-         if ( itmp_short_2d(i,j) == ifill .and. qf(i,j) == 4 ) then !invalid_due_to_clear_or_probably_clear_sky_qf
-            ctp(i,j) = -777.
-         end if
-      end do
-   end do
-   !write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
-   deallocate(itmp_short_2d)
-   if( allocated(itmp_2d) ) deallocate(itmp_2d)
+!    ctp(:,:) = rmiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          if ( itmp_short_2d(i,j) /= ifill ) then
+!             if (qf(i,j) == 0 ) then ! good quality
+!                if( l_unsigned == "true" ) then
+!                   ctp(i,j) = offset + itmp_2d(i,j) * scalef
+!                else
+!                   ctp(i,j) = offset + itmp_short_2d(i,j) * scalef
+!                end if
+!             end if
+!          end if
+!       end do
+!    end do
+!    !write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
+!    deallocate(itmp_short_2d)
+!    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
-   return
-end subroutine read_L2_PRES
+!    return
+! end subroutine read_L2_PRES
 
-subroutine decode_nc_fname(fname, finfo, scan_mode, is_HSD, is_TEMP, is_Phase, &
-                           is_HT, is_PRES, band_id, sat_id, start_time, jday)
+! subroutine decode_hsd_fname(fname, finfo, scan_mode, is_HSD, is_TEMP, is_Phase, &                      ! original
+!                            is_HT, is_PRES, band_id, sat_id, start_time, jday)
+
+subroutine decode_hsd_fname(fname, finfo, scan_mode, is_HSD, band_id, sat_id, start_time, jday)          ! MRI TODO - adjust this section in a way that is applicable to HSD data
    implicit none
    character(len=*),  intent(in)  :: fname
    character(len=18), intent(out) :: finfo
    character(len=2),  intent(out) :: scan_mode
    logical,           intent(out) :: is_HSD
-   logical,           intent(out) :: is_TEMP
-   logical,           intent(out) :: is_Phase
-   logical,           intent(out) :: is_HT
-   logical,           intent(out) :: is_PRES
+   ! logical,           intent(out) :: is_TEMP                    ! MRI commented out because we are not using TEMP at the moment
+   ! logical,           intent(out) :: is_Phase                   ! MRI commented out because we are not using Phase at the moment
+   ! logical,           intent(out) :: is_HT                      ! MRI commented out because we are not using HT at the moment
+   ! logical,           intent(out) :: is_PRES                    ! MRI commented out because we are not using PRES at the moment
    integer(i_kind),   intent(out) :: band_id
    character(len=3),  intent(out) :: sat_id
    character(len=22), intent(out) :: start_time
@@ -1222,13 +1231,13 @@ subroutine decode_nc_fname(fname, finfo, scan_mode, is_HSD, is_TEMP, is_Phase, &
       write(start_time,'(i4.4,4(a,i2.2),a,i2.2,a,i1,a)') &
             year, '-', month, '-', day, 'T', hour, ':',  minute, ':', sec1, '.', sec2, 'Z'
    else
-      write(0,*) 'Error decode_nc_fname'
+      write(0,*) 'Error decode_hsd_fname'
       stop
    end if
    return
-end subroutine decode_nc_fname
+end subroutine decode_hsd_fname
 
-subroutine get_date(ccyy, jday, month, day)
+subroutine get_date(ccyy, jday, month, day)                                                  ! MRI TODO - use this one if works as expected. if not, use the one I built
    implicit none
    integer(i_kind), intent(in)  :: ccyy, jday
    integer(i_kind), intent(out) :: month, day
@@ -1259,7 +1268,7 @@ subroutine get_date(ccyy, jday, month, day)
    return
 end subroutine get_date
 
-subroutine output_iodav1(fname, time_start, nx, ny, nband, got_latlon, lat, lon, sat_zen, sun_zen, bt, qf, sdtb, cloudmask)
+subroutine output_iodav1(fname, time_start, nx, ny, nband, got_latlon, lat, lon, sat_zen, sun_zen, bt, qf, sdtb, cloudmask)            ! MRI TODO - check if we need any change for HSD
 
    implicit none
 
@@ -1460,7 +1469,7 @@ subroutine output_iodav1(fname, time_start, nx, ny, nband, got_latlon, lat, lon,
 
 end subroutine output_iodav1
 
-subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon, sat_zen, sun_zen, bt, bt_std)
+subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon, sat_zen, sun_zen, bt, bt_std)                      ! MRI TODO - check if we need any change for HSD
 
    implicit none
 
@@ -1674,7 +1683,7 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
 
 end subroutine output_iodav1_o2m
 
-subroutine calc_solar_zenith_angle(nx, ny, xlat, xlon, xtime, julian, solzen, got_latlon)
+subroutine calc_solar_zenith_angle(nx, ny, xlat, xlon, xtime, julian, solzen, got_latlon)                   ! MRI TODO - check if we need any change for HSD
 
 ! the calulcation is adapted from subroutines radconst and calc_coszen in
 ! WRF phys/module_radiation_driver.F
@@ -1736,7 +1745,7 @@ end subroutine calc_solar_zenith_angle
     end if
   end subroutine check
 
-subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq, h_sat, rzen )
+subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq, h_sat, rzen )           ! MRI TODO - check if we need any change for HSD
    implicit none
    real(r_kind),   intent(in)  :: rlat    ! in [radian]
    real(r_kind),   intent(in)  :: rlon    ! in [radian]
@@ -1761,4 +1770,4 @@ subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq,
    return
 end subroutine calc_geostationary_satellite_zenith_angle
 
- end module mod_himawari_ahi
+end module mod_himawari_ahi

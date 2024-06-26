@@ -1,3 +1,6 @@
+! there are some code differences between obs2model and obs2ioda's netcdf_mod.f90
+! for now, I am going with obs2model version. If there is an issue later on, I will investigate in details
+ 
 module netcdf_mod
 
   use netcdf

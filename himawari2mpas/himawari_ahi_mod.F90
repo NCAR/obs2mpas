@@ -6,9 +6,9 @@
 ! 27-Oct-2022
 !----------------------------------------------------------------------
 !
-module  mod_himawari_ahi                                                            ! MRI customizing existing module
+module  mod_himawari_ahi                                                               ! MRI customizing existing module
 !
-! Purpose: Convert Himawari HSD files to ioda-v1 format.                            ! modified by MRI  
+! Purpose: Convert Himawari HSD files to ioda-v1 format.                               ! modified by MRI  
 !
 ! input files:
 !    (1) flist.txt: contains a list of HSD files (exclude path) to be processed
@@ -22,14 +22,14 @@ module  mod_himawari_ahi                                                        
 !        /
 
    use netcdf_mod, only: open_netcdf_for_write, close_netcdf, &
-      def_netcdf_dims, def_netcdf_var, def_netcdf_end, &
-      put_netcdf_var, missing_r
+      def_netcdf_dims, def_netcdf_var, def_netcdf_end, put_netcdf_var, &
+      missing_r, nf90_float, nf90_int, nf90_char, nf90_int64
 
-   ! MRI -- copied from hsd.f90 [obs2ioda-v2]
+   ! MRI -- copied and modified from hsd.f90 [obs2ioda-v2]
    use define_mod, only: inst_list, set_name_satellite, set_name_sensor, xdata, name_sen_info, &
       nvar_info, name_var_info, type_var_info, type_sen_info, set_brit_obserr
    use ufo_vars_mod, only: ufo_vars_getindex
-   use netcdf, only: nf90_float, nf90_int, nf90_char, nf90_int64
+   ! use netcdf, only: nf90_float, nf90_int, nf90_char, nf90_int64                     ! MRI - combined with netcdf_mod
    use utils_mod, only: get_julian_time
 
    use control_para !BJJ
@@ -38,25 +38,246 @@ module  mod_himawari_ahi                                                        
    include 'netcdf.inc'
 
 ! BJJ moved to control_para module
-!        integer, parameter  :: r_single = selected_real_kind(6)  ! single precision
-!        integer, parameter  :: r_double = selected_real_kind(15) ! double precision
-!        integer, parameter  :: i_byte   = selected_int_kind(1)   ! byte integer
-!        integer, parameter  :: i_short  = selected_int_kind(4)   ! short integer
-!        integer, parameter  :: i_long   = selected_int_kind(8)   ! long integer
-!        integer, parameter  :: i_kind   = i_long                 ! default integer
-!        integer, parameter  :: r_kind   = r_single               ! default real
-! BJJ    integer, parameter  :: r_kind   = r_double               ! default real
+!        integer, parameter  :: r_single = selected_real_kind(6)                       ! single precision
+!        integer, parameter  :: r_double = selected_real_kind(15)                      ! double precision
+!        integer, parameter  :: i_byte   = selected_int_kind(1)                        ! byte integer
+!        integer, parameter  :: i_short  = selected_int_kind(4)                        ! short integer
+!        integer, parameter  :: i_long   = selected_int_kind(8)                        ! long integer
+!        integer, parameter  :: i_kind   = i_long                                      ! default integer
+!        integer, parameter  :: r_kind   = r_single                                    ! default real
+! BJJ    integer, parameter  :: r_kind   = r_double                                    ! default real
+
+   
+   ! following datetime parameters were copied from hsd.f90 [obs2ioda-v2]
+   integer(i_kind) :: mmday(12) = (/31,28,31,30,31,30,31,31,30,31,30,31/)
+   character(len=ndatetime)  :: datetime                                               ! ccyy-mm-ddThh:mm:ssZ
+   real(r_double)   :: gstime
+   integer(i_llong) :: epochtime
+   integer(i_kind)  :: iyear, imonth, iday, ihour, imin, isec
+   integer(i_kind) :: subsample
 
    ! prefix of Clear Sky Mask (Binary Cloud Mask) output of cspp-geo-aitf package
    character(len=6), parameter :: HSD_id   = 'HS_H08'
-   ! character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'    !MRI commented out initially 
-   ! character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'    !MRI commented out initially
-   ! character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'    !MRI commented out initially
-   ! character(len=14), parameter :: PRES_id  = 'OR_ABI-L2-CTPF'     !MRI commented out initially
+   ! character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'                      ! MRI commented out initially 
+   ! character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'                      ! MRI commented out initially
+   ! character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'                      ! MRI commented out initially
+   ! character(len=14), parameter :: PRES_id  = 'OR_ABI-L2-CTPF'                       ! MRI commented out initially
 
-   integer(i_kind), parameter :: nband      = 10  ! IR bands 7-16    ! MRI - checked and found the same for AHI
-   integer(i_kind) :: band_start = 7
-   integer(i_kind) :: band_end   = 16
+   ! following parameters were copied from hsd.f90 [obs2ioda-v2]
+   integer(i_kind), parameter :: npixel = 5500
+   integer(i_kind), parameter :: nline  = 5500
+   integer(i_kind), parameter :: nband      = 10         ! number of infrared bands    ! MRI - checked and found the same for AHI and ABI
+   ! integer(i_kind) :: band_start = 7                                                 ! MRI commented out initially 
+   ! integer(i_kind) :: band_end   = 16                                                ! MRI commented out initially 
+   integer(i_kind), parameter :: nsegm = 10                                            ! number of segment
+
+   ! following parameters were copied from hsd.f90 [obs2ioda-v2]
+   real(r_single)  :: longitude(npixel, nline)
+   real(r_single)  :: latitude(npixel, nline)
+   real(r_single)  :: brit(npixel, nline, nband)
+   real(r_kind)    :: bt_sup(npixel, nline, nband)       ! superobbed brightness temperature(superobpixel, superobline, nband)
+   real(r_single)  :: solzen(npixel, nline)
+   real(r_single)  :: satzen(npixel, nline)
+   logical         :: valid(npixel, nline)
+   real(r_double)  :: rlat, rlon, lon_diff, tmp1, theta1, theta2
+   integer(i_kind) :: ntotal, npix, nlin
+   integer(i_kind) :: nfile
+   integer(i_kind) :: ifile
+   character(len=StrLen), allocatable :: fnames(:)
+   logical, allocatable :: fexist(:)
+
+   ! following basic information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type basic_info
+      integer(i_byte)    :: headerNum                    ! header block number = 1
+      integer(i_short)   :: blockLen                     ! block length = 282 bytes
+      integer(i_short)   :: numHeader                    ! total number of header blocks = 11
+      integer(i_byte)    :: byteOrder                    ! 0: little_endian, 1: big endian
+      character(len=16)  :: satName                      ! 'Himawari-8'
+      character(len=16)  :: procCenter                   ! 'MSC', 'OSK'
+      character(len=4)   :: obsArea                      ! 'FLDK'
+      character(len=2)   :: dummy2
+      integer(i_short)   :: hhnn                         ! observation timeline
+      real(r_double)     :: obsStartTime                 ! Modified Julian Date
+      real(r_double)     :: obsEndTime                   ! Modified Julian Date
+      real(r_double)     :: fileCreateTime               ! Modified Julian Date
+      integer(i_long)    :: totalHeaderLen
+      integer(i_long)    :: dataLen
+      integer(i_byte)    :: qcflag1
+      integer(i_byte)    :: qcflag2
+      integer(i_byte)    :: qcflag3
+      integer(i_byte)    :: qcflag4
+      character(len=32)  :: version
+      character(len=128) :: fileName
+      character(len=40)  :: dummy40
+   end type basic_info
+
+   ! following information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type data_info
+      integer(i_byte)    :: headerNum                    ! header block number = 2
+      integer(i_short)   :: blockLen                     ! block length = 50 bytes
+      integer(i_short)   :: bitPix                       ! number of bits per pixel = 16
+      integer(i_short)   :: nPix                         ! number of columns (pixels east-west)
+      integer(i_short)   :: nLin                         ! number of lines (pixels north-south)
+      integer(i_byte)    :: compression                  ! 0: no compression (default), 1: gzip, 2: bzip2
+      character(len=40)  :: dummy40
+   end type data_info
+
+   ! following projection information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type proj_info
+      integer(i_byte)    :: headerNum                    ! header block number = 3
+      integer(i_short)   :: blockLen                     ! block length = 127 bytes
+      real(r_double)     :: subLon                       ! 140.7 degree
+      integer(i_long)    :: cfac                         ! column scaling factor
+      integer(i_long)    :: lfac                         ! line scaling factor
+      real(r_single)     :: coff                         ! column offset
+      real(r_single)     :: loff                         ! line offset
+      real(r_double)     :: satDis                       ! distance from earth's center to virtual satellite = 42164 km
+      real(r_double)     :: eqtrRadius                   ! earth's equatorial radius = 6378.1370 km
+      real(r_double)     :: polrRadius                   ! earth's polar radius = 6356.7523 km
+      real(r_double)     :: projParam1                   ! 0.00669438444
+      real(r_double)     :: projParam2                   ! 0.993305616
+      real(r_double)     :: projParam3                   ! 1.006739501
+      real(r_double)     :: projParamSd                  ! 1737122264
+      integer(i_short)   :: resampleKind
+      integer(i_short)   :: resampleSize
+      character(len=40)  :: dummy40
+   end type proj_info
+
+   ! following navigation information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type navi_info
+      integer(i_byte)    :: headerNum                    ! header block number = 4
+      integer(i_short)   :: blockLen                     ! block length = 139 bytes
+      real(r_double)     :: navTime                      ! navigation information time in MJD
+      real(r_double)     :: sspLon
+      real(r_double)     :: sspLat
+      real(r_double)     :: satDis
+      real(r_double)     :: nadirLon
+      real(r_double)     :: nadirLat
+      real(r_double)     :: sunPos_x
+      real(r_double)     :: sunPos_y
+      real(r_double)     :: sunPos_z
+      real(r_double)     :: moonPos_x
+      real(r_double)     :: moonPos_y
+      real(r_double)     :: moonPos_z
+      character(len=40)  :: dummy40
+   end type navi_info
+
+   ! following calibration information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type calib_info
+      integer(i_byte)    :: headerNum                    ! header block number = 5
+      integer(i_short)   :: blockLen                     ! block length = 147 bytes
+      integer(i_short)   :: bandNo
+      real(r_double)     :: waveLen
+      integer(i_short)   :: bitPix
+      integer(i_short)   :: errorCount
+      integer(i_short)   :: outCount
+      ! count-radiance conversion equation
+      real(r_double)     :: gain_cnt2rad
+      real(r_double)     :: cnst_cnt2rad
+      ! correction coefficient of sensor Planck function for converting radiance to brightness temperature
+      real(r_double)     :: rad2btp_c0
+      real(r_double)     :: rad2btp_c1
+      real(r_double)     :: rad2btp_c2
+      ! for converting brightness temperature to radiance
+      real(r_double)     :: btp2rad_c0
+      real(r_double)     :: btp2rad_c1
+      real(r_double)     :: btp2rad_c2
+      real(r_double)     :: lightSpeed
+      real(r_double)     :: planckConst
+      real(r_double)     :: bolzConst
+      character(len=40)  :: dummy40
+   end type calib_info
+
+   ! following inter-calibration information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type interCalib_info
+      integer(i_byte)    :: headerNum                    ! header block number = 6
+      integer(i_short)   :: blockLen                     ! block length = 259 bytes
+      character(len=256) :: dummy256
+   end type interCalib_info
+
+   ! following segmentation information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type segm_info
+      integer(i_byte)    :: headerNum                    ! header block number = 7
+      integer(i_short)   :: blockLen                     ! block length = 47 bytes
+      integer(i_byte)    :: totalSegNum                  ! total number of segments. 1: no divisions
+      integer(i_byte)    :: segSeqNo                     ! segment sequence number
+      integer(i_short)   :: startLineNo                  ! first line number of image segment
+      character(len=40)  :: dummy40
+   end type segm_info
+
+   ! following navigation correction information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type naviCorr_info
+      integer(i_byte)    :: headerNum                    ! header block number = 8
+      integer(i_short)   :: blockLen                     ! block length
+      real(r_single)     :: RoCenterColumn
+      real(r_single)     :: RoCenterLine
+      real(r_double)     :: RoCorrection
+      integer(i_short)   :: correctNum
+      integer(i_short), allocatable :: lineNo(:)         !(correctNum)
+      real(r_single),   allocatable :: columnShift(:)    !(correctNum)
+      real(r_single),   allocatable :: lineShift(:)      !(correctNum)
+      character(len=40)  :: dummy40
+   end type naviCorr_info
+
+   ! following observation time information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type obsTime_info
+      integer(i_byte)    :: headerNum                    ! header block number = 9
+      integer(i_short)   :: blockLen                     ! block length
+      integer(i_short)   :: obsNum                       ! number of observation times
+      integer(i_short), allocatable :: lineNo(:)         !(obsNum)
+      real(r_double),   allocatable :: obsMJD(:)         !(obsNum) observation time in MJD
+      character(len=40)  :: dummy40
+   end type obsTime_info
+
+   ! following error information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type error_info
+      integer(i_byte)    :: headerNum                    ! header block number = 10
+      integer(i_long)    :: blockLen                     ! block length = 47
+      integer(i_short)   :: errorNum                     ! number of error information data = 0
+      !  integer(i_short), allocatable :: lineNo(:)      !(errorNum)
+      !  integer(i_short), allocatable :: errPixNum(:)   !(errorNum)
+      character(len=40)  :: dummy40
+   end type error_info
+
+   ! following dummy information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type dummy_info
+      integer(i_byte)    :: headerNum                    ! header block number = 11
+      integer(i_short)   :: blockLen                     ! block length = 259 bytes
+      character(len=256) :: dummy256
+   end type dummy_info
+
+   ! following header information on hsd data were copied from hsd.f90 [obs2ioda-v2]
+   type HSD_header
+      type(basic_info)      :: basic
+      type(data_info)       :: data
+      type(proj_info)       :: proj
+      type(navi_info)       :: navi
+      type(calib_info)      :: calib
+      type(interCalib_info) :: interCalib
+      type(segm_info)       :: segm
+      type(naviCorr_info)   :: navicorr
+      type(obsTime_info)    :: obstime
+      type(error_info)      :: error
+      type(dummy_info)      :: dummy
+   end type HSD_header
+
+   type(HSD_header) :: header                            ! MRI copied from hsd.f90 [obs2ioda-v2]
+
+   ! following parameters on trigonometric conversion were copied from hsd.f90 [obs2ioda-v2]
+   real(r_double), parameter :: pi = acos(-1.0)
+   real(r_double), parameter :: deg2rad = pi/180.0
+   real(r_double), parameter :: rad2deg = 180.0/pi
+
+
+
+
+
+
+
+
+
+
+
 
    !real(r_kind) :: pi, deg2rad, rad2deg !BJJ moved to control_para module
 
@@ -84,6 +305,7 @@ module  mod_himawari_ahi                                                        
       real(r_kind),    allocatable :: sd(:)       ! std_dev(nband)
       integer(i_kind), allocatable :: cm(:,:)     ! cloud mask(nx,ny)
    end type rad_type
+
    type(rad_type), allocatable  :: rdata(:)  ! (ntime)
 
    character(len=22), allocatable :: time_start(:)  ! (ntime) 2017-10-01T18:02:19.6Z
@@ -113,7 +335,9 @@ module  mod_himawari_ahi                                                        
    logical                         :: isfile
    logical                         :: found_time
    logical                         :: got_grid_info
+
    ! logical, allocatable            :: valid(:), is_BCM(:), is_TEMP(:), is_Phase(:), is_HT(:), is_PRES(:)           ! original
+
    logical, allocatable            :: valid(:), is_HSD(:) !  modification by MRI 
    character(len=256), allocatable :: hsd_fnames(:)
    character(len=256)              :: fname

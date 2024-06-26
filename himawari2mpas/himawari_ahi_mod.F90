@@ -25,6 +25,13 @@ module  mod_himawari_ahi                                                        
       def_netcdf_dims, def_netcdf_var, def_netcdf_end, &
       put_netcdf_var, missing_r
 
+   ! MRI -- copied from hsd.f90 [obs2ioda-v2]
+   use define_mod, only: inst_list, set_name_satellite, set_name_sensor, xdata, name_sen_info, &
+      nvar_info, name_var_info, type_var_info, type_sen_info, set_brit_obserr
+   use ufo_vars_mod, only: ufo_vars_getindex
+   use netcdf, only: nf90_float, nf90_int, nf90_char, nf90_int64
+   use utils_mod, only: get_julian_time
+
    use control_para !BJJ
 
    implicit none
@@ -41,7 +48,7 @@ module  mod_himawari_ahi                                                        
 ! BJJ    integer, parameter  :: r_kind   = r_double               ! default real
 
    ! prefix of Clear Sky Mask (Binary Cloud Mask) output of cspp-geo-aitf package
-   character(len=14), parameter :: HSD_id   = 'HS_H08'
+   character(len=6), parameter :: HSD_id   = 'HS_H08'
    ! character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'    !MRI commented out initially 
    ! character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'    !MRI commented out initially
    ! character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'    !MRI commented out initially

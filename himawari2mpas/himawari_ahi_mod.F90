@@ -37,16 +37,7 @@ module  mod_himawari_ahi                                                        
    implicit none
    include 'netcdf.inc'
 
-! BJJ moved to control_para module
-!        integer, parameter  :: r_single = selected_real_kind(6)                       ! single precision
-!        integer, parameter  :: r_double = selected_real_kind(15)                      ! double precision
-!        integer, parameter  :: i_byte   = selected_int_kind(1)                        ! byte integer
-!        integer, parameter  :: i_short  = selected_int_kind(4)                        ! short integer
-!        integer, parameter  :: i_long   = selected_int_kind(8)                        ! long integer
-!        integer, parameter  :: i_kind   = i_long                                      ! default integer
-!        integer, parameter  :: r_kind   = r_single                                    ! default real
-! BJJ    integer, parameter  :: r_kind   = r_double                                    ! default real
-
+   character(len=6), parameter :: HSD_id   = 'HS_H08'                                  ! MRI
    
    ! following datetime parameters were copied from hsd.f90 [obs2ioda-v2]
    integer(i_kind) :: mmday(12) = (/31,28,31,30,31,30,31,31,30,31,30,31/)
@@ -55,13 +46,6 @@ module  mod_himawari_ahi                                                        
    integer(i_llong) :: epochtime
    integer(i_kind)  :: iyear, imonth, iday, ihour, imin, isec
    integer(i_kind) :: subsample
-
-   ! prefix of Clear Sky Mask (Binary Cloud Mask) output of cspp-geo-aitf package
-   character(len=6), parameter :: HSD_id   = 'HS_H08'
-   ! character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'                      ! MRI commented out initially 
-   ! character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'                      ! MRI commented out initially
-   ! character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'                      ! MRI commented out initially
-   ! character(len=14), parameter :: PRES_id  = 'OR_ABI-L2-CTPF'                       ! MRI commented out initially
 
    ! following parameters were copied from hsd.f90 [obs2ioda-v2]
    integer(i_kind), parameter :: npixel = 5500
@@ -213,9 +197,9 @@ module  mod_himawari_ahi                                                        
       real(r_single)     :: RoCenterLine
       real(r_double)     :: RoCorrection
       integer(i_short)   :: correctNum
-      integer(i_short), allocatable :: lineNo(:)         !(correctNum)
-      real(r_single),   allocatable :: columnShift(:)    !(correctNum)
-      real(r_single),   allocatable :: lineShift(:)      !(correctNum)
+      integer(i_short), allocatable :: lineNo(:)         ! (correctNum)
+      real(r_single),   allocatable :: columnShift(:)    ! (correctNum)
+      real(r_single),   allocatable :: lineShift(:)      ! (correctNum)
       character(len=40)  :: dummy40
    end type naviCorr_info
 
@@ -224,8 +208,8 @@ module  mod_himawari_ahi                                                        
       integer(i_byte)    :: headerNum                    ! header block number = 9
       integer(i_short)   :: blockLen                     ! block length
       integer(i_short)   :: obsNum                       ! number of observation times
-      integer(i_short), allocatable :: lineNo(:)         !(obsNum)
-      real(r_double),   allocatable :: obsMJD(:)         !(obsNum) observation time in MJD
+      integer(i_short), allocatable :: lineNo(:)         ! (obsNum)
+      real(r_double),   allocatable :: obsMJD(:)         ! (obsNum) observation time in MJD
       character(len=40)  :: dummy40
    end type obsTime_info
 
@@ -234,8 +218,8 @@ module  mod_himawari_ahi                                                        
       integer(i_byte)    :: headerNum                    ! header block number = 10
       integer(i_long)    :: blockLen                     ! block length = 47
       integer(i_short)   :: errorNum                     ! number of error information data = 0
-      !  integer(i_short), allocatable :: lineNo(:)      !(errorNum)
-      !  integer(i_short), allocatable :: errPixNum(:)   !(errorNum)
+      !  integer(i_short), allocatable :: lineNo(:)      ! (errorNum)
+      !  integer(i_short), allocatable :: errPixNum(:)   ! (errorNum)
       character(len=40)  :: dummy40
    end type error_info
 
@@ -268,45 +252,61 @@ module  mod_himawari_ahi                                                        
    real(r_double), parameter :: deg2rad = pi/180.0
    real(r_double), parameter :: rad2deg = 180.0/pi
 
+   !
+   ! --------------------------- commented parameters for GOES ABI [from obs2model] --------------------------- 
+   ! 
 
+   ! BJJ moved to control_para module
+   !        integer, parameter  :: r_single = selected_real_kind(6)                    ! single precision
+   !        integer, parameter  :: r_double = selected_real_kind(15)                   ! double precision
+   !        integer, parameter  :: i_byte   = selected_int_kind(1)                     ! byte integer
+   !        integer, parameter  :: i_short  = selected_int_kind(4)                     ! short integer
+   !        integer, parameter  :: i_long   = selected_int_kind(8)                     ! long integer
+   !        integer, parameter  :: i_kind   = i_long                                   ! default integer
+   !        integer, parameter  :: r_kind   = r_single                                 ! default real
+   ! BJJ    integer, parameter  :: r_kind   = r_double                                 ! default real
 
+   ! prefix of Clear Sky Mask (Binary Cloud Mask) output of cspp-geo-aitf package
+   ! character(len=14), parameter :: BCM_id   = 'OR_ABI-L2-ACMF'
+   ! character(len=15), parameter :: TEMP_id  = 'OR_ABI-L2-ACHTF'                     
+   ! character(len=15), parameter :: Phase_id = 'OR_ABI-L2-ACTPF'                
+   ! character(len=15), parameter :: HT_id    = 'OR_ABI-L2-ACHAF'               
+   ! character(len=14), parameter :: PRES_id  = 'OR_ABI-L2-CTPF'          
 
+   ! real(r_kind) :: pi, deg2rad, rad2deg    !BJJ moved to control_para module
 
+   ! logical, allocatable :: got_latlon(:,:)
+   ! real(r_kind), allocatable :: glat(:,:)    ! grid latitude (nx,ny)
+   ! real(r_kind), allocatable :: glon(:,:)    ! grid longitude (nx,ny)
+   ! real(r_kind), allocatable :: gzen(:,:)    ! satellite zenith angle (nx,ny)
+   ! real(r_kind), allocatable :: solzen(:,:)  ! solar zenith angle (nx,ny)
 
+   ! real(r_kind),    allocatable :: rad_2d(:,:)  ! radiance(nx,ny)
+   ! real(r_kind),    allocatable :: bt_2d(:,:)   ! brightness temperature(nx,ny)
+   ! integer(i_kind), allocatable :: qf_2d(:,:)   ! quality flag(nx,ny)
+   !          qf (DQF, Data Quality Flag)
+   !          0:good, 1:conditionally_usable, 2:out_of_range, 3:no_value
+   ! integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
+   ! real(r_kind),    allocatable :: ctt_2d(:,:)  ! cloud top temperature(nx,ny) !BJJ    
+   ! real(r_kind),    allocatable :: ctph_2d(:,:) ! cloud top phase(nx,ny) !BJJ        
+   ! real(r_kind),    allocatable :: cth_2d(:,:)  ! cloud top height(nx,ny) !BJJ        
+   ! real(r_kind),    allocatable :: ctp_2d(:,:)  ! cloud top pressure(nx,ny) !BJJ     
 
+   ! type rad_type
+   !    real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
+   !    real(r_kind),    allocatable :: bt(:,:,:)   ! brightness temperature(nband,nx,ny)
+   !    integer(i_kind), allocatable :: qf(:,:,:)   ! quality flag(nband,nx,ny)
+   !    real(r_kind),    allocatable :: sd(:)       ! std_dev(nband)
+   !    integer(i_kind), allocatable :: cm(:,:)     ! cloud mask(nx,ny)
+   ! end type rad_type
 
+   ! type(rad_type), allocatable  :: rdata(:)  ! (ntime)
+ 
+   ! 
+   ! --------------------------------------------------------------------------------------------------------- ]
+   ! 
 
-
-
-
-   !real(r_kind) :: pi, deg2rad, rad2deg !BJJ moved to control_para module
-
-   logical, allocatable :: got_latlon(:,:)
-   real(r_kind), allocatable :: glat(:,:)    ! grid latitude (nx,ny)
-   real(r_kind), allocatable :: glon(:,:)    ! grid longitude (nx,ny)
-   real(r_kind), allocatable :: gzen(:,:)    ! satellite zenith angle (nx,ny)
-   real(r_kind), allocatable :: solzen(:,:)  ! solar zenith angle (nx,ny)
-
-   real(r_kind),    allocatable :: rad_2d(:,:)  ! radiance(nx,ny)
-   real(r_kind),    allocatable :: bt_2d(:,:)   ! brightness temperature(nx,ny)
-   integer(i_kind), allocatable :: qf_2d(:,:)   ! quality flag(nx,ny)
-            ! qf (DQF, Data Quality Flag)
-            ! 0:good, 1:conditionally_usable, 2:out_of_range, 3:no_value
-   integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
-   ! real(r_kind),    allocatable :: ctt_2d(:,:)  ! cloud top temperature(nx,ny) !BJJ     !MRI commented out initially
-   ! real(r_kind),    allocatable :: ctph_2d(:,:) ! cloud top phase(nx,ny) !BJJ           !MRI commented out initially
-   ! real(r_kind),    allocatable :: cth_2d(:,:)  ! cloud top height(nx,ny) !BJJ          !MRI commented out initially
-   ! real(r_kind),    allocatable :: ctp_2d(:,:)  ! cloud top pressure(nx,ny) !BJJ        !MRI commented out initially
-
-   type rad_type
-      real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
-      real(r_kind),    allocatable :: bt(:,:,:)   ! brightness temperature(nband,nx,ny)
-      integer(i_kind), allocatable :: qf(:,:,:)   ! quality flag(nband,nx,ny)
-      real(r_kind),    allocatable :: sd(:)       ! std_dev(nband)
-      integer(i_kind), allocatable :: cm(:,:)     ! cloud mask(nx,ny)
-   end type rad_type
-
-   type(rad_type), allocatable  :: rdata(:)  ! (ntime)
+   ! MRI TODO - modify the following parameters so it can be used to read HSD data from the text file specified in the namelist
 
    character(len=22), allocatable :: time_start(:)  ! (ntime) 2017-10-01T18:02:19.6Z
 
@@ -354,9 +354,11 @@ module  mod_himawari_ahi                                                        
    contains
 
 
-   subroutine Himawari_AHI_converter (glon_out, glat_out, F_out, varname_out, got_latlon_out)                  ! MRI TODO - make adjustments so that it can be used for HSD
+   subroutine Himawari_AHI_converter (glon_out, glat_out, F_out, varname_out, got_latlon_out)                        ! MRI TODO - make adjustments so that it can be used for HSD
 
    implicit none
+
+   ! MRI TODO - make necessary adjustments to the following sections so that it can be used for HSD
    real(r_kind),      allocatable, intent(out) :: glon_out(:,:)
    real(r_kind),      allocatable, intent(out) :: glat_out(:,:)
    real(r_kind),      allocatable, intent(out) :: F_out(:,:,:)         ! (nx,ny, nfield), nfield=nfile, one file for each field
@@ -365,9 +367,10 @@ module  mod_himawari_ahi                                                        
    ! loc
    integer :: ix
    
-   !pi = acos(-1.0)
-   !deg2rad = pi/180.0
-   !rad2deg = 1.0/deg2rad
+   ! pi = acos(-1.0)
+   ! deg2rad = pi/180.0
+   ! rad2deg = 1.0/deg2rad
+
    !
    ! initialize namelist variables
    !
@@ -378,6 +381,7 @@ module  mod_himawari_ahi                                                        
    n_subsample       = 1
    !
    write_iodav1      = .false.
+
    !
    ! read namelist
    !
@@ -390,14 +394,14 @@ module  mod_himawari_ahi                                                        
    end if
 
    ! get file names from hsd_list_file
-   nfile  = 0  ! initialize the number of netcdf files to read
+   nfile  = 0  ! initialize the number of HSD files to read
    inquire(file=trim(hsd_list_file), exist=isfile)
    if ( .not. isfile ) then
       write(0,*) 'File not found: hsd_list_file '//trim(hsd_list_file)
       stop 1
    else
       open(unit=iunit, file=trim(hsd_list_file), status='old', form='formatted')
-      !first find out the number of netcdf files to read
+      ! first find out the number of HSD files to read
       istat = 0
       do while ( istat == 0 )
          read(unit=iunit, fmt='(a)', iostat=istat) txtbuf
@@ -409,7 +413,7 @@ module  mod_himawari_ahi                                                        
       end do
       if ( nfile > 0 ) then
          allocate (hsd_fnames(nfile))                                       ! MRI TODO - change it from NC to HSD
-         !read the hsd_list_file again to get the netcdf file names
+         ! read the hsd_list_file again to get the HSD file names
          rewind(iunit)
          do ifile = 1, nfile
             read(unit=iunit, fmt='(a)', iostat=istat) hsd_fnames(ifile)     ! MRI TODO - change it from NC to HSD
@@ -419,7 +423,7 @@ module  mod_himawari_ahi                                                        
          stop
       end if
       close(iunit)
-   end if !hsd_list_file
+   end if ! hsd_list_file
 
    allocate (ftime_id(nfile))
    allocate (scan_time(nfile))
@@ -454,12 +458,12 @@ module  mod_himawari_ahi                                                        
          write(0,*) 'File found: '//trim(fname)         
       end if
 
-      ! ! retrieve some basic info from the netcdf filename itself
+      ! retrieve some basic info from the netcdf filename itself
       ! call decode_hsd_fname(trim(hsd_fnames(ifile)),finfo, scan_mode, &                      ! original
       !    is_HSD(ifile), is_TEMP(ifile), is_Phase(ifile), is_HT(ifile), is_PRES(ifile), &
       !    fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile))
 
-      ! retrieve some basic info from the netcdf filename itself
+      ! retrieve some basic info from the HSD filename itself
       call decode_hsd_fname(trim(hsd_fnames(ifile)),finfo, scan_mode, &                        ! modified by MRI
          is_HSD(ifile), fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile))
 
@@ -755,11 +759,11 @@ subroutine read_GRB_dims(ncid, nx, ny)                                        ! 
    return
 end subroutine read_GRB_dims
 
-!NC_BYTE 8-bit signed integer
-!NC_SHORT 16-bit signed integer
-!NC_INT (or NC_LONG) 32-bit signed integer
-!NC_FLOAT 32-bit floating point
-!NC_DOUBLE 64-bit floating point
+! NC_BYTE 8-bit signed integer
+! NC_SHORT 16-bit signed integer
+! NC_INT (or NC_LONG) 32-bit signed integer
+! NC_FLOAT 32-bit floating point
+! NC_DOUBLE 64-bit floating point
 
 subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)          ! MRI TODO - make adjustments so that it can be used for HSD
    implicit none
@@ -785,7 +789,7 @@ subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)          ! 
    real(r_kind)   :: rlat, rlon, lon_diff, tmp1, theta1, theta2
    continue
 
-!int goes_imager_projection ;
+! int goes_imager_projection ;
 !  goes_imager_projection:long_name = "GOES-R ABI fixed grid projection" ;
 !  goes_imager_projection:grid_mapping_name = "geostationary" ;
 !  goes_imager_projection:perspective_point_height = 35786023. ;
@@ -806,7 +810,7 @@ subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)          ! 
    nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'longitude_of_projection_origin',  dtmp)
    lon_sat = dtmp * deg2rad
 
-!short x(x) ;
+! short x(x) ;
 !  x:scale_factor = 5.6e-05f ;
 !  x:add_offset = -0.075012f ;
 !  x:units = "rad" ;
@@ -826,7 +830,7 @@ subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)          ! 
    end do
    deallocate(itmp_short_1d)
 
-!short y(y) ;
+! short y(y) ;
 !  y:scale_factor = -5.6e-05f ;
 !  y:add_offset = 0.126532f ;
 !  y:units = "rad" ;
@@ -1070,7 +1074,7 @@ end subroutine read_L1_HSD
 
 !    ! time_start is the same for all bands, but time_end is not
 !    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
 !    istart(1) = 1
 !    icount(1) = nx
@@ -1111,8 +1115,8 @@ end subroutine read_L1_HSD
 !          end do
 !       end do
 !    end if
-!    !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-!    !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+!    ! write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+!    ! write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
 !    ctt(:,:) = rmiss
 !    do j = 1, ny
@@ -1128,7 +1132,7 @@ end subroutine read_L1_HSD
 !          end if
 !       end do
 !    end do
-!    !write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
+!    ! write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
 !    deallocate(itmp_short_2d)
 !    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
@@ -1152,7 +1156,7 @@ end subroutine read_L1_HSD
 
 !    ! time_start is the same for all bands, but time_end is not
 !    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
 !    istart(1) = 1
 !    icount(1) = nx
@@ -1211,7 +1215,7 @@ end subroutine read_L1_HSD
 
 !    ! time_start is the same for all bands, but time_end is not
 !    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
 !    istart(1) = 1
 !    icount(1) = nx
@@ -1252,8 +1256,8 @@ end subroutine read_L1_HSD
 !          end do
 !       end do
 !    end if
-!    !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-!    !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+!    ! write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+!    ! write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
 !    cth(:,:) = rmiss
 !    do j = 1, ny
@@ -1269,7 +1273,7 @@ end subroutine read_L1_HSD
 !          end if
 !       end do
 !    end do
-!    !write(*,*) "min/max of cth =", minval(cth), maxval(cth)
+!    ! write(*,*) "min/max of cth =", minval(cth), maxval(cth)
 !    deallocate(itmp_short_2d)
 !    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
@@ -1298,7 +1302,7 @@ end subroutine read_L1_HSD
 
 !    ! time_start is the same for all bands, but time_end is not
 !    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+!    ! nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
 
 !    istart(1) = 1
 !    icount(1) = nx
@@ -1339,8 +1343,8 @@ end subroutine read_L1_HSD
 !          end do
 !       end do
 !    end if
-!    !write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
-!    !write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
+!    ! write(*,*) "min/max of itmp_short_2d =", minval(itmp_short_2d), maxval(itmp_short_2d)
+!    ! write(*,*) "min/max of itmp_2d =", minval(itmp_2d), maxval(itmp_2d)
 
 !    ctp(:,:) = rmiss
 !    do j = 1, ny
@@ -1356,7 +1360,7 @@ end subroutine read_L1_HSD
 !          end if
 !       end do
 !    end do
-!    !write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
+!    ! write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
 !    deallocate(itmp_short_2d)
 !    if( allocated(itmp_2d) ) deallocate(itmp_2d)
 
@@ -1405,9 +1409,9 @@ subroutine decode_hsd_fname(fname, finfo, scan_mode, is_HSD, band_id, sat_id, st
       is_PRES = .false.
    end if
 
-   !CG_ABI-L2-ACMC-M3_G16_s20180351202275_e20180351205060_c20180351205106.nc
-   !OR_ABI-L1b-RadC-M3C16_G16_s20172741802196_e20172741804580_c20172741805015.nc
-   !1234567890123456789012345678901234567890123456789012345678901234567890123456
+   ! CG_ABI-L2-ACMC-M3_G16_s20180351202275_e20180351205060_c20180351205106.nc
+   ! OR_ABI-L1b-RadC-M3C16_G16_s20172741802196_e20172741804580_c20172741805015.nc
+   ! 1234567890123456789012345678901234567890123456789012345678901234567890123456
    if ( .not. ( is_HSD .or. is_TEMP .or. is_Phase .or. is_HT .or. is_PRES ) ) then
       read(fname( 1:18), '(a18)') finfo
       read(fname(17:18), '(a2)')  scan_mode
@@ -1425,9 +1429,9 @@ subroutine decode_hsd_fname(fname, finfo, scan_mode, is_HSD, band_id, sat_id, st
       write(start_time,'(i4.4,4(a,i2.2),a,i2.2,a,i1,a)') &
             year, '-', month, '-', day, 'T', hour, ':',  minute, ':', sec1, '.', sec2, 'Z'
    else if ( is_HSD .or. is_PRES ) then
-   !OR_ABI-L2-ACMF-M3_G16_s20181050000419_e20181050011186_c20181050011347.nc
-   !OR_ABI-L2-CTPF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
-   !1234567890123456789012345678901234567890123456789012345678901234567890123456
+   ! OR_ABI-L2-ACMF-M3_G16_s20181050000419_e20181050011186_c20181050011347.nc
+   ! OR_ABI-L2-CTPF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
+   ! 1234567890123456789012345678901234567890123456789012345678901234567890123456
       read(fname( 1:17), '(a17)') finfo
       read(fname(16:17), '(a2)')  scan_mode
       read(fname(19:21), '(a3)')  sat_id
@@ -1443,10 +1447,10 @@ subroutine decode_hsd_fname(fname, finfo, scan_mode, is_HSD, band_id, sat_id, st
       write(start_time,'(i4.4,4(a,i2.2),a,i2.2,a,i1,a)') &
             year, '-', month, '-', day, 'T', hour, ':',  minute, ':', sec1, '.', sec2, 'Z'
    else if ( is_TEMP .or. is_Phase .or. is_HT ) then
-      !OR_ABI-L2-ACHTF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
-      !OR_ABI-L2-ACTPF-M3_G16_s20181050000419_e20181050011186_c20181050011460.nc
-      !OR_ABI-L2-ACHAF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
-      !1234567890123456789012345678901234567890123456789012345678901234567890123456
+      ! OR_ABI-L2-ACHTF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
+      ! OR_ABI-L2-ACTPF-M3_G16_s20181050000419_e20181050011186_c20181050011460.nc
+      ! OR_ABI-L2-ACHAF-M3_G16_s20181050000419_e20181050011186_c20181050012223.nc
+      ! 1234567890123456789012345678901234567890123456789012345678901234567890123456
       read(fname( 1:18), '(a18)') finfo
       read(fname(17:18), '(a2)')  scan_mode
       read(fname(20:22), '(a3)')  sat_id
@@ -1712,8 +1716,8 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    real(r_kind),       intent(in) :: lon(nC)
    real(r_kind),       intent(in) :: sat_zen(nC)
    real(r_kind),       intent(in) :: sun_zen(nC)
-   real(r_kind),       intent(in) :: bt(nband+1,nC) !BJJ 1:nband for bt, nband+1 for 2d cloud fraction
-   real(r_kind),       intent(in) :: bt_std(nband+1,nC) !BJJ 1:nband for bt, nband+1 for # of obs for SO
+   real(r_kind),       intent(in) :: bt(nband+1,nC) ! BJJ 1:nband for bt, nband+1 for 2d cloud fraction
+   real(r_kind),       intent(in) :: bt_std(nband+1,nC) ! BJJ 1:nband for bt, nband+1 for # of obs for SO
 
    integer(i_kind), parameter :: nstring = 50
    integer(i_kind), parameter :: ndatetime = 20
@@ -1732,7 +1736,7 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    real(r_kind), allocatable :: bt_std_out(:,:)
    real(r_kind), allocatable :: err_out(:,:)
    real(r_kind), allocatable :: qf_out(:,:)
-   integer(i_kind), allocatable :: iC_out(:)  !BJJ for cellIndex@MetaData
+   integer(i_kind), allocatable :: iC_out(:)  ! BJJ for cellIndex@MetaData
 
    integer(i_kind) :: ncid_nlocs
    integer(i_kind) :: ncid_nvars
@@ -1755,7 +1759,7 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    nlocs = 0
    do iC = 1, nC
       if ( .not. got_latlon(iC) ) cycle
-      if ( sat_zen(iC) >= 70.0 ) cycle !BJJ 80 -> 70 for consistency btw tb & cm
+      if ( sat_zen(iC) >= 70.0 ) cycle ! BJJ 80 -> 70 for consistency btw tb & cm
       if ( all(bt(:,iC)<0.0) ) cycle
       nlocs = nlocs + 1
    end do
@@ -1774,11 +1778,11 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    allocate (sat_azi_out(nlocs))
    allocate (sun_zen_out(nlocs))
    allocate (sun_azi_out(nlocs))
-   allocate (bt_out(nband+1,nlocs)) !BJJ nband+1 for 2d cf
-   allocate (bt_std_out(nband+1,nlocs)) !BJJ nband+1 for 2d cf
+   allocate (bt_out(nband+1,nlocs)) ! BJJ nband+1 for 2d cf
+   allocate (bt_std_out(nband+1,nlocs)) ! BJJ nband+1 for 2d cf
    allocate (err_out(nband,nlocs))
    allocate (qf_out(nband,nlocs))
-   allocate (iC_out(nlocs))  !BJJ for cellIndex@MetaData
+   allocate (iC_out(nlocs))  ! BJJ for cellIndex@MetaData
 
    read(time_start( 1: 4), '(i4)') iyear
    read(time_start( 6: 7), '(i2)') imonth
@@ -1790,7 +1794,7 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    iloc = 0
    do iC = 1, nC
       if ( .not. got_latlon(iC) ) cycle
-      if ( sat_zen(iC) >= 70.0 ) cycle !BJJ 80 -> 70 for consistency btw tb & cm
+      if ( sat_zen(iC) >= 70.0 ) cycle ! BJJ 80 -> 70 for consistency btw tb & cm
       if ( all(bt(:,iC)<0.0) ) cycle
       iloc = iloc + 1
       write(unit=datetime(iloc), fmt='(i4,a,i2.2,a,i2.2,a,i2.2,a,i2.2,a,i2.2,a)')  &
@@ -1799,14 +1803,14 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
       lon_out(iloc) = lon(iC)
       sat_zen_out(iloc) = sat_zen(iC)
       sun_zen_out(iloc) = sun_zen(iC)
-      bt_out(1:nband+1,iloc) = bt(1:nband+1,iC) !BJJ nband+1 for 2d cf
-      bt_std_out(1:nband+1,iloc) = bt_std(1:nband+1,iC) !BJJ nband+1 for 2d cf
+      bt_out(1:nband+1,iloc) = bt(1:nband+1,iC) ! BJJ nband+1 for 2d cf
+      bt_std_out(1:nband+1,iloc) = bt_std(1:nband+1,iC) ! BJJ nband+1 for 2d cf
       qf_out(1:nband,iloc) = 0.0 ! BJJ what this can be for superob/nearest obs ?
       scan_pos_out(iloc) = 0.0   ! BJJ what this can be ?
       sat_azi_out(iloc) = missing_r
       sun_azi_out(iloc) = missing_r
-      err_out(1:nband,iloc) = 1.0 !missing_r
-      iC_out(iloc) = iC !BJJ
+      err_out(1:nband,iloc) = 1.0 ! missing_r
+      iC_out(iloc) = iC ! BJJ
    end do
 
    call open_netcdf_for_write(trim(fname),ncfileid)
@@ -1914,54 +1918,183 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
 
 end subroutine output_iodav1_o2m
 
-subroutine calc_solar_zenith_angle(nx, ny, xlat, xlon, xtime, julian, solzen, got_latlon)                   ! MRI TODO - check if we need any change for HSD
+! MRI - copied subroutine to convert pixlin to latlon for hsd.f90 [obs2ioda-v2]
+subroutine pixlin_to_lonlat(pix, lin, lon, lat, ierr)
+
+ implicit none
+
+ integer(i_kind), intent(in)  :: pix, lin
+ real(r_double),  intent(out) :: lon, lat
+ integer(i_kind), intent(out) :: ierr
+
+ real(r_double) :: SCLUNIT = 2.0**(-16)
+ real(r_double) :: x, y
+ real(r_double) :: Sd, Sn, S1, S2, S3, Sxy
+ real(r_double) :: c, l
+
+ ! initialize
+ lon = missing_r
+ lat = missing_r
+ ierr = 0
+
+ ! pix, lin -> c, l
+ c = float(pix)
+ l = float(lin)
+
+ ! intermediate coordinates (x,y)
+ ! Global Specification 4.4.4 Scaling Function
+ ! https://www.cgms-info.org/wp-content/uploads/2021/10/cgms-lrit-hrit-global-specification-(v2-8-of-30-oct-2013).pdf
+ !    c = COFF + nint(x * 2^-16 * CFAC)
+ !    l = LOFF + nint(y * 2^-16 * LFAC)
+ ! The intermediate coordinates (x,y) are as follows :
+ !    x = (c -COFF) / (2^-16 * CFAC)
+ !    y = (l -LOFF) / (2^-16 * LFAC)
+ !    SCLUNIT = 2^-16
+ x = deg2rad * ( c - header%proj%coff) / ( SCLUNIT * header%proj%cfac)
+ y = deg2rad * ( l - header%proj%loff) / ( SCLUNIT * header%proj%lfac)
+
+ ! longtitude,latitude
+ ! Global Specification 4.4.3.2
+ ! The invers projection function is as follows :
+ !   lon = arctan(S2/S1) + sub_lon
+ !   lat = arctan( (Req^2/Rpol^2) * S3 / Sxy )
+ !
+ ! Thererin the variables S1,S2,S3,Sxy are as follows :
+ !    S1  = Rs - Sn * cos(x) * cos(y)
+ !    S2  = Sn * sin(x) * cos(y)
+ !    S3  =-Sn * sin(y)
+ !    Sxy = sqrt(S1^2 + S2^2)
+ !    Sn  =(Rs * cos(x) * cos(y) - Sd ) /
+ !         (cos(y) * cos(y) + (Req^2/Rpol^2) * sin(y) * sin(y))
+ !    Sd  =sqrt( (Rs * cos(x) * cos(y))^2
+ !               - ( cos(y) * cos(y) + (Req^2/Rpol^2) * sin(y) * sin(y) )
+ !               * (Rs^2 - Req^2)
+ ! The variables Rs,Rpol,Req,(Req^2/Rpol^2),(Rs^2 - Req^2) are as follows :
+ !    Rs  : distance from Earth center to satellite= head->proj->satDis
+ !    Rpol: polar radius of the Earth              = head->proj->polrRadius
+ !    Req : equator raidus of the Earth            = head->proj->eqtrRadius
+ !    (Req^2/Rpol^2)                               = head->proj->projParam3
+ !    (Rs^2 - Req^2)                               = head->proj->projParamSd
+ Sd = (header%proj%satDis * cos(x) * cos(y)) * &
+      (header%proj%satDis * cos(x) * cos(y)) - &
+      (cos(y) * cos(y) + header%proj%projParam3 * sin(y) * sin(y)) * &
+       header%proj%projParamSd
+ if ( Sd < 0 ) then
+    !write(*,*) 'Error in Sd'
+    ierr = -1
+    return
+ else
+    Sd = sqrt(Sd)
+ end if
+ Sn = (header%proj%satDis * cos(x) * cos(y) -Sd) / &
+      (cos(y) * cos(y) + header%proj%projParam3 * sin(y) * sin(y))
+ S1 = header%proj%satDis - (Sn * cos(x) * cos(y))
+ S2 = Sn * sin(x) * cos(y)
+ S3 =-Sn * sin(y)
+ Sxy=sqrt( S1 * S1 + S2 * S2)
+
+ lon = rad2deg * atan2(S2,S1) + header%proj%subLon
+ lat = rad2deg * atan(header%proj%projParam3 * S3 / Sxy)
+
+ ! check longtitude
+ if ( lon >  180.0 ) lon = lon - 360.0
+ if ( lon < -180.0 ) lon = lon + 360.0
+
+ return
+end subroutine pixlin_to_lonlat
+
+! MRI - copied subroutine to compute solar zenith angle for hsd.f90 [obs2ioda-v2]
+subroutine calc_solar_zenith_angle(xlat, xlon, gmt, minute, julian, solzen)
 
 ! the calulcation is adapted from subroutines radconst and calc_coszen in
 ! WRF phys/module_radiation_driver.F
 
-   implicit none
+ implicit none
 
-   integer(i_kind),   intent(in)    :: nx, ny, julian
-   real(r_kind),      intent(in)    :: xlat(nx,ny), xlon(nx,ny)
-   character(len=22), intent(in)    :: xtime
-   real(r_kind),      intent(inout) :: solzen(nx,ny)
-   logical,           intent(in)    :: got_latlon(nx,ny)
+ real(r_single),  intent(in)    :: xlat, xlon
+ integer(i_kind), intent(in)    :: gmt, minute, julian
+ real(r_single),  intent(inout) :: solzen
 
-   real(r_kind) :: obliq = 23.5
-   real(r_kind) :: deg_per_day = 360.0/365.0
-   real(r_kind) :: slon   ! longitude of the sun
-   real(r_kind) :: declin ! declination of the sun
-   real(r_kind) :: hrang, da, eot, xt, tloctm, rlat
-   integer(i_kind) :: gmt, minute, i, j
+ real(r_single) :: obliq = 23.5
+ real(r_single) :: deg_per_day = 360.0/365.0
+ real(r_single) :: slon   ! longitude of the sun
+ real(r_single) :: declin ! declination of the sun
+ real(r_single) :: hrang, da, eot, xt, tloctm, rlat
 
-   ! calculate longitude of the sun from vernal equinox
-   if ( julian >= 80 ) slon = (julian - 80 ) * deg_per_day
-   if ( julian <  80 ) slon = (julian + 285) * deg_per_day
+ ! initialize to missing values
+ solzen = missing_r
 
-   declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad)) ! in radian
+ ! calculate longitude of the sun from vernal equinox
+ if ( julian >= 80 ) slon = (julian - 80 ) * deg_per_day
+ if ( julian <  80 ) slon = (julian + 285) * deg_per_day
 
-   read(xtime(12:13), '(i2)') gmt
-   read(xtime(15:16), '(i2)') minute
+ declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad)) ! in radian
 
-   da = 6.2831853071795862*(julian-1)/365.
-   eot = (0.000075+0.001868*cos(da)-0.032077*sin(da) &
-          -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)
-   xt = gmt + (minute + eot)/60.0
+ da = 6.2831853071795862*(julian-1)/365.
+ eot = (0.000075+0.001868*cos(da)-0.032077*sin(da) &
+        -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)
+ xt = gmt + (minute + eot)/60.0
 
-   do j = 1, ny
-      do i = 1, nx
-         if ( .not. got_latlon(i,j) ) cycle
-         tloctm = xt + xlon(i,j)/15.0
-         hrang = 15.0*(tloctm-12.0) * deg2rad
-         rlat = xlat(i,j) * deg2rad
-         solzen(i,j) = acos( sin(rlat)*sin(declin) + &
-                             cos(rlat)*cos(declin)*cos(hrang) )
-         solzen(i,j) = solzen(i,j) * rad2deg
-      end do
-   end do
+ if ( abs(xlon) > 360.0 .or. abs(xlat) > 90.0 ) return
+ tloctm = xt + xlon/15.0
+ hrang = 15.0*(tloctm-12.0) * deg2rad
+ rlat = xlat * deg2rad
+ solzen = acos( sin(rlat)*sin(declin) + &
+                cos(rlat)*cos(declin)*cos(hrang) )
+ solzen = solzen * rad2deg
 
-   return
+ return
 end subroutine calc_solar_zenith_angle
+
+! MRI - commented out subroutine to compute solar zenith angle for obs2model 
+! subroutine calc_solar_zenith_angle(nx, ny, xlat, xlon, xtime, julian, solzen, got_latlon)
+
+! ! the calulcation is adapted from subroutines radconst and calc_coszen in
+! ! WRF phys/module_radiation_driver.F
+
+!    implicit none
+
+!    integer(i_kind),   intent(in)    :: nx, ny, julian
+!    real(r_kind),      intent(in)    :: xlat(nx,ny), xlon(nx,ny)
+!    character(len=22), intent(in)    :: xtime
+!    real(r_kind),      intent(inout) :: solzen(nx,ny)
+!    logical,           intent(in)    :: got_latlon(nx,ny)
+
+!    real(r_kind) :: obliq = 23.5
+!    real(r_kind) :: deg_per_day = 360.0/365.0
+!    real(r_kind) :: slon   ! longitude of the sun
+!    real(r_kind) :: declin ! declination of the sun
+!    real(r_kind) :: hrang, da, eot, xt, tloctm, rlat
+!    integer(i_kind) :: gmt, minute, i, j
+
+!    ! calculate longitude of the sun from vernal equinox
+!    if ( julian >= 80 ) slon = (julian - 80 ) * deg_per_day
+!    if ( julian <  80 ) slon = (julian + 285) * deg_per_day
+
+!    declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad)) ! in radian
+
+!    read(xtime(12:13), '(i2)') gmt
+!    read(xtime(15:16), '(i2)') minute
+
+!    da = 6.2831853071795862*(julian-1)/365.
+!    eot = (0.000075+0.001868*cos(da)-0.032077*sin(da) &
+!           -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)
+!    xt = gmt + (minute + eot)/60.0
+
+!    do j = 1, ny
+!       do i = 1, nx
+!          if ( .not. got_latlon(i,j) ) cycle
+!          tloctm = xt + xlon(i,j)/15.0
+!          hrang = 15.0*(tloctm-12.0) * deg2rad
+!          rlat = xlat(i,j) * deg2rad
+!          solzen(i,j) = acos( sin(rlat)*sin(declin) + &
+!                              cos(rlat)*cos(declin)*cos(hrang) )
+!          solzen(i,j) = solzen(i,j) * rad2deg
+!       end do
+!    end do
+
+!    return
+! end subroutine calc_solar_zenith_angle
 
 !     This subroutine handles errors by printing an error message and
 !     exiting with a non-zero status.
@@ -1996,9 +2129,49 @@ subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq,
    theta1 = 2.0*asin(tmp1/r_eq/2.)
    theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
    rzen = theta1+theta2
-   !gzen(i,j) = 90.0 - atan((cos(lon_diff)*cos(rlat)-0.1512)/(sqrt(1.0-cos(lon_diff)*cos(lon_diff)*cos(rlat)*cos(rlat)))) * rad2deg
+   ! gzen(i,j) = 90.0 - atan((cos(lon_diff)*cos(rlat)-0.1512)/(sqrt(1.0-cos(lon_diff)*cos(lon_diff)*cos(rlat)*cos(rlat)))) * rad2deg
 
    return
 end subroutine calc_geostationary_satellite_zenith_angle
+
+! MRI - this subroutine to calculate brightness temperature was copied from hsd.f90 [obs2ioda-v2]
+subroutine hisd_radiance_to_tbb (radiance, tbb)
+
+ implicit none
+
+ real(r_double), intent(in)  :: radiance
+ real(r_double), intent(out) :: tbb
+
+ real(r_double) :: lambda
+ real(r_double) :: planck_c1
+ real(r_double) :: planck_c2
+
+ real(r_double) :: effective_temperature
+
+ ! central wave length
+ lambda = header%calib%waveLen / 1000000.0 ! [micro m] => [m]
+
+ ! radiance = radiance * 1000000.0  ! [ W/(m^2 sr micro m)] => [ W/(m^2 sr m)]
+
+ ! planck_c1 = (2 * h * c^2 / lambda^5)
+ planck_c1 = 2.0 * header%calib%planckConst *  &
+             header%calib%lightSpeed ** 2 / &
+             lambda ** 5
+
+ ! planck_c2 = (h * c / k / lambda )
+ planck_c2 = header%calib%planckConst * header%calib%lightSpeed / &
+             header%calib%bolzConst / lambda
+
+ if ( radiance > 0 ) then
+    effective_temperature = planck_c2 / &
+                            log( (planck_c1 / radiance ) + 1.0 )
+    tbb = header%calib%rad2btp_c0 + &
+          header%calib%rad2btp_c1 * effective_temperature + &
+          header%calib%rad2btp_c2 * effective_temperature ** 2
+ else
+    tbb = missing_r
+ end if
+ return
+end subroutine hisd_radiance_to_tbb
 
 end module mod_himawari_ahi

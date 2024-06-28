@@ -740,264 +740,884 @@ module  mod_himawari_ahi                                                        
 
  end subroutine Himawari_AHI_converter
 
- 
-subroutine read_GRB_dims(ncid, nx, ny)                                        ! MRI TODO - make adjustments so that it can be used for HSD
-   implicit none
-   integer(i_kind), intent(in)  :: ncid
-   integer(i_kind), intent(out) :: nx, ny
-   integer(i_kind)              :: dimid
-   integer(i_kind)              :: nf_status(4)
-   continue
-   nf_status(1) = nf_INQ_DIMID(ncid, 'x', dimid)
-   nf_status(2) = nf_INQ_DIMLEN(ncid, dimid, nx)
-   nf_status(3) = nf_INQ_DIMID(ncid, 'y', dimid)
-   nf_status(4) = nf_INQ_DIMLEN(ncid, dimid, ny)
-   if ( any(nf_status /= 0) ) then
-      write(0,*) 'Error reading dimensions'
-      stop
-   end if
-   return
-end subroutine read_GRB_dims
+! -------------------------------------------------------------------------------------------------------------------------------------------
 
-! NC_BYTE 8-bit signed integer
-! NC_SHORT 16-bit signed integer
-! NC_INT (or NC_LONG) 32-bit signed integer
-! NC_FLOAT 32-bit floating point
-! NC_DOUBLE 64-bit floating point
+!
+! MRI -- copied subroutine  [from obs2ioda] to read HSD data
+!
 
-subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)          ! MRI TODO - make adjustments so that it can be used for HSD
-   implicit none
-   integer(i_kind), intent(in)    :: ncid
-   integer(i_kind), intent(in)    :: nx, ny
-   real(r_kind),    intent(inout) :: glat(nx,ny)
-   real(r_kind),    intent(inout) :: glon(nx,ny)
-   real(r_kind),    intent(inout) :: gzen(nx,ny)
-   logical,         intent(inout) :: got_latlon(nx,ny)
-   integer(i_kind)                :: varid, i, j
-   integer(i_kind)                :: nf_status
-   integer(i_kind)                :: istart(1), icount(1)
-   integer(i_short), allocatable  :: itmp_short_1d(:)
-   real(r_kind),     allocatable  :: x(:)
-   real(r_kind),     allocatable  :: y(:)
-   real(r_single) :: scalef, offset
-   real(r_double) :: dtmp
-   real(r_double) :: r_eq    ! GRS80 semi-major axis of earth
-   real(r_double) :: r_pol   ! GRS80 semi-minor axis of earth = (1-f)*r_eq
-   real(r_double) :: lon_sat ! satellite longitude, longitude_of_projection_origin
-   real(r_double) :: h_sat   ! satellite height
-   real(r_double) :: a, b, c, rs, sx, sy, sz
-   real(r_kind)   :: rlat, rlon, lon_diff, tmp1, theta1, theta2
-   continue
+subroutine read_HSD(ccyymmddhhnn, inpdir, do_superob, superob_halfwidth)
 
-! int goes_imager_projection ;
-!  goes_imager_projection:long_name = "GOES-R ABI fixed grid projection" ;
-!  goes_imager_projection:grid_mapping_name = "geostationary" ;
-!  goes_imager_projection:perspective_point_height = 35786023. ;
-!  goes_imager_projection:semi_major_axis = 6378137. ;
-!  goes_imager_projection:semi_minor_axis = 6356752.31414 ;
-!  goes_imager_projection:inverse_flattening = 298.2572221 ;
-!  goes_imager_projection:latitude_of_projection_origin = 0. ;
-!  goes_imager_projection:longitude_of_projection_origin = -89.5 ;
-!  goes_imager_projection:sweep_angle_axis = "x" ;
+implicit none
 
-   nf_status = nf_INQ_VARID(ncid, 'goes_imager_projection', varid)
-   nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'semi_major_axis',  dtmp)
-   r_eq = dtmp
-   nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'semi_minor_axis',  dtmp)
-   r_pol = dtmp
-   nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'perspective_point_height',  dtmp)
-   h_sat = dtmp + r_eq  ! perspective_point_height + semi_major_axis
-   nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'longitude_of_projection_origin',  dtmp)
-   lon_sat = dtmp * deg2rad
+character(len=12), intent(in) :: ccyymmddhhnn
+character(len=*),  intent(in) :: inpdir
+logical,           intent(in) :: do_superob
+integer(i_kind),   intent(in) :: superob_halfwidth
 
-! short x(x) ;
-!  x:scale_factor = 5.6e-05f ;
-!  x:add_offset = -0.075012f ;
-!  x:units = "rad" ;
-!  x:axis = "X" ;
-!  x:long_name = "GOES fixed grid projection x-coordinate" ;
+character(len=1051) :: dummy1051
+character(len=1)    :: dummy1
+character(len=16)   :: dummy16
+character(len=8)    :: ccyymmdd
+character(len=4)    :: ccyy, hhnn
+character(len=2)    :: mm, dd, hh, nn
+character(len=3)    :: satellite = 'H08'
+character(len=4)    :: region = 'FLDK'
+character(len=3)    :: resolution = 'R20'
+character(len=5)    :: segment ! S0110, S0210, etc
+character(len=3)    :: band    ! B07 - B16
+integer(i_short), allocatable :: idata(:)
+integer(i_kind) :: blocklen_8
+integer(i_kind) :: numCorrect
+integer(i_kind) :: numObs
+integer(i_kind) :: ipixel, iline
+integer(i_kind) :: startLine, endLine
+integer(i_kind) :: radcount, i, ii, jj, ij, iv
+integer(i_kind) :: iband, isegm
+integer(i_kind) :: ierr
+integer(i_kind) :: nlocs, nvars, iloc
+integer(i_kind) :: ihh, imm, idd, jday, flength, rvalue, offset
+integer(i_kind) :: iunit = 21
+real(r_double)  :: lon, lat
+real(r_double)  :: radiance, tbb
+real(r_double)  :: lon_sat, h_sat, r_eq
+integer(i_kind) :: nodivisionsegm = 1
+integer         :: superob_width ! Must be ≥ 0
+integer         :: first_boxcenter, last_boxcenter_x, last_boxcenter_y, box_bottom, box_upper, box_left, box_right
+integer         :: ibox, jbox, nkeep, ix, iy, tb, k
+real(r_kind)    :: temp1 = 0.0
+! end of declaration
+continue
 
-   istart(1) = 1
-   icount(1) = nx
-   allocate(itmp_short_1d(nx))
-   nf_status = nf_INQ_VARID(ncid, 'x', varid)
-   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:1), icount(1:1), itmp_short_1d(:))
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
-   allocate(x(nx))
-   do i = 1, nx
-      x(i) = offset + itmp_short_1d(i) * scalef
+longitude(:,:) = missing_r
+latitude(:,:)  = missing_r
+brit(:,:,:)    = missing_r
+bt_sup(:,:,:)  = missing_r
+solzen(:,:)    = missing_r
+satzen(:,:)    = missing_r
+valid(:,:)     = .false.
+
+! construct file names
+nfile = nband * nsegm
+allocate (fnames(nfile))
+allocate (fexist(nfile))
+
+ccyymmdd = ccyymmddhhnn(1:8)
+hhnn     = ccyymmddhhnn(9:12)
+ccyy     = ccyymmddhhnn(1:4)
+mm       = ccyymmddhhnn(5:6)
+dd       = ccyymmddhhnn(7:8)
+hh       = ccyymmddhhnn(9:10)
+nn       = ccyymmddhhnn(11:12)
+read(mm, '(i2)') imm  !month
+read(dd, '(i2)') idd  !day
+jday = 0
+do i = 1, imm - 1
+   jday = jday + mmday(i)
+end do
+jday = jday + idd
+
+do iband = 1, nband
+   do isegm = 1, nsegm
+      write(band, '(a,i2.2)') 'B', iband+6
+      write(segment,'(a,i2.2,i2.2)') 'S', isegm, nsegm
+      ij = isegm + (iband-1) * nsegm
+      fnames(ij) = trim(inpdir)//'HS_'//satellite//'_'//ccyymmdd//'_'//hhnn//'_'//band//'_'//region//'_'//resolution//'_'//segment//'.DAT'
+!write(33,*) 'wget -np -nd -nc http://noaa-himawari8.s3.amazonaws.com/AHI-L1b-FLDK/' &
+!& //ccyy//'/'//mm//'/'//dd//'/'//hhnn//'/'//trim(fnames(ij))//'.bz2'
+      inquire(file=trim(fnames(ij)), exist=fexist(ij))
+      if ( fexist(ij) == .false. ) then
+         write(segment,'(a,i2.2,i2.2)') 'S', isegm, nodivisionsegm
+         fnames(ij) = trim(inpdir)//'HS_'//satellite//'_'//ccyymmdd//'_'//hhnn//'_'//band//'_'//region//'_'//resolution//'_'//segment//'.DAT'
+         inquire(file=trim(fnames(ij)), exist=fexist(ij))
+      end if
+!print*,iband, isegm, trim(fnames(ij)), fexist(ij)
    end do
-   deallocate(itmp_short_1d)
+end do
 
-! short y(y) ;
-!  y:scale_factor = -5.6e-05f ;
-!  y:add_offset = 0.126532f ;
-!  y:units = "rad" ;
-!  y:axis = "Y" ;
-!  y:long_name = "GOES fixed grid projection y-coordinate" ;
-!  y:standard_name = "projection_y_coordinate" ;
+do iband = 1, nband
+   do isegm = 1, nsegm
+      ifile = isegm + (iband-1) * nsegm
+      if ( .not. fexist(ifile) ) cycle
+      open(iunit, file=trim(fnames(ifile)), form='unformatted', action='read', access='stream', status='old', convert='little_endian')
+      print*,'Reading from ', trim(fnames(ifile))
 
-   istart(1) = 1
-   icount(1) = ny
-   allocate(itmp_short_1d(ny))
-   nf_status = nf_INQ_VARID(ncid, 'y', varid)
-   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:1), icount(1:1), itmp_short_1d(:))
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
-   allocate(y(ny))
-   do i = 1, ny
-      y(i) = offset + itmp_short_1d(i) * scalef
-   end do
-   deallocate(itmp_short_1d)
-   ! Product Definition and User's Guide (PUG) Volume 3, pp. 19-21
-   ! from fixed grid x/y to geodetic lat/lon
-   got_latlon(1:nx,1:ny) = .true.
-   do j = 1, ny
-      do i = 1, nx
-         a = sin(x(i))*sin(x(i)) + cos(x(i))*cos(x(i)) * &
-             (cos(y(j))*cos(y(j))+(r_eq/r_pol)*(r_eq/r_pol)*sin(y(j))*sin(y(j)))
-         b = -2.0*h_sat*cos(x(i))*cos(y(j))
-         c = h_sat*h_sat - r_eq*r_eq
-         if ( (b*b-4.0*a*c) < 0.0 ) then
-            got_latlon(i,j) = .false.
-            cycle
-         end if
-         rs = (-1.0*b - sqrt(b*b-4.0*a*c)) / (2.0*a)
-         sx = rs * cos(x(i)) * cos(y(j))
-         sy = -1.0 * rs * sin(x(i))
-         sz = rs * cos(x(i)) * sin(y(j))
-         !glat(i,j) = (atan((r_eq/r_pol)*(r_eq/r_pol)*(sz/sqrt((h_sat-sx)*(h_sat-sx)+sy*sy)))) * rad2deg
-         !glon(i,j) = (lon_sat - atan(sy/(h_sat-sx))) * rad2deg
-         glat(i,j) = atan((r_eq/r_pol)*(r_eq/r_pol)*(sz/sqrt((h_sat-sx)*(h_sat-sx)+sy*sy)))
-         glon(i,j) = lon_sat - atan(sy/(h_sat-sx))
-      end do
-   end do
+      read(iunit) header%basic%headerNum, &
+                  header%basic%blockLen, &
+                  header%basic%numHeader, &
+                  header%basic%byteOrder, &
+                  header%basic%satName, &
+                  header%basic%procCenter, &
+                  header%basic%obsArea, &
+                  header%basic%dummy2, &
+                  header%basic%hhnn, &
+                  header%basic%obsStartTime, &
+                  header%basic%obsEndTime, &
+                  header%basic%fileCreateTime, &
+                  header%basic%totalHeaderLen, &
+                  header%basic%dataLen, &
+                  header%basic%qcflag1, &
+                  header%basic%qcflag2, &
+                  header%basic%qcflag3, &
+                  header%basic%qcflag4, &
+                  header%basic%version, &
+                  header%basic%fileName, &
+                  header%basic%dummy40
+      read(iunit) header%data%headerNum, &
+                  header%data%blockLen,&
+                  header%data%bitPix, &
+                  header%data%nPix, &
+                  header%data%nLin, &
+                  header%data%compression, &
+                  header%data%dummy40
+      read(iunit) header%proj%headerNum, &
+                  header%proj%blockLen, &
+                  header%proj%subLon, &
+                  header%proj%cfac, &
+                  header%proj%lfac, &
+                  header%proj%coff, &
+                  header%proj%loff, &
+                  header%proj%satDis, &
+                  header%proj%eqtrRadius, &
+                  header%proj%polrRadius, &
+                  header%proj%projParam1, &
+                  header%proj%projParam2, &
+                  header%proj%projParam3, &
+                  header%proj%projParamSd, &
+                  header%proj%resampleKind, &
+                  header%proj%resampleSize, &
+                  header%proj%dummy40
+      read(iunit) header%navi%headerNum, &
+                  header%navi%blockLen, &
+                  header%navi%navTime, &
+                  header%navi%sspLon, &
+                  header%navi%sspLat, &
+                  header%navi%satDis, &
+                  header%navi%nadirLon, &
+                  header%navi%nadirLat, &
+                  header%navi%sunPos_x, &
+                  header%navi%sunPos_y, &
+                  header%navi%sunPos_z, &
+                  header%navi%moonPos_x, &
+                  header%navi%moonPos_y, &
+                  header%navi%moonPos_z, &
+                  header%navi%dummy40
+      read(iunit) header%calib%headerNum, &
+                  header%calib%blockLen, &
+                  header%calib%bandNo, &
+                  header%calib%waveLen, &
+                  header%calib%bitPix, &
+                  header%calib%errorCount, &
+                  header%calib%outCount, &
+                  header%calib%gain_cnt2rad, &
+                  header%calib%cnst_cnt2rad, &
+                  header%calib%rad2btp_c0, &
+                  header%calib%rad2btp_c1, &
+                  header%calib%rad2btp_c2, &
+                  header%calib%btp2rad_c0, &
+                  header%calib%btp2rad_c1, &
+                  header%calib%btp2rad_c2, &
+                  header%calib%lightSpeed, &
+                  header%calib%planckConst, &
+                  header%calib%bolzConst, &
+                  header%calib%dummy40
+      read(iunit) header%interCalib%headerNum, &
+                  header%interCalib%blockLen, &
+                  header%interCalib%dummy256
+      read(iunit) header%segm%headerNum, &
+                  header%segm%blockLen, &
+                  header%segm%totalSegNum, &
+                  header%segm%segSeqNo, &
+                  header%segm%startLineNo, &
+                  header%segm%dummy40
+      read(iunit) header%navicorr%headerNum, &
+                  header%navicorr%blockLen, &
+                  header%navicorr%RoCenterColumn, &
+                  header%navicorr%RoCenterLine, &
+                  header%navicorr%RoCorrection, &
+                  header%navicorr%correctNum
+      if ( header%navicorr%correctNum > 0 ) then
+         numCorrect = header%navicorr%correctNum
+         allocate(header%navicorr%lineNo(numCorrect))
+         allocate(header%navicorr%columnShift(numCorrect))
+         allocate(header%navicorr%lineShift(numCorrect))
+      end if
+      read(iunit) header%navicorr%lineNo(numCorrect), &
+                  header%navicorr%columnShift(numCorrect), &
+                  header%navicorr%lineShift(numCorrect), &
+                  header%navicorr%dummy40
+      rewind(iunit)
+      read(iunit) header%obstime%headerNum, &
+                  header%obstime%blockLen, &
+                  header%obstime%obsNum
+      if ( header%obsTime%obsNum > 0 ) then
+         numObs = header%obsTime%obsNum
+         allocate(header%obsTime%lineNo(numObs))
+         allocate(header%obsTime%obsMJD(numObs))
+      end if
+      read(iunit) header%obstime%lineNo, &
+                  header%obstime%obsMJD, &
+                  header%obstime%dummy40
+      read(iunit) header%error%headerNum, &
+                  header%error%blockLen, &
+                  header%error%errorNum, &
+                  header%error%dummy40
+      read(iunit) header%dummy%headerNum, &
+                  header%dummy%blockLen, &
+                  header%dummy%dummy256
+      npix = header%data%nPix
+      nlin = header%data%nLin
+      ntotal = npix * nlin
+      allocate(idata(ntotal))
 
-   deallocate(x)
-   deallocate(y)
+      inquire(file=trim(fnames(ifile)), size=flength)
+      ! Offset relative to the beginning of the file
+      offset = flength - (npix * nlin *2)
+      ! Reposition the file to the offset value for reading
+      call fseek(iunit, offset, 0, rvalue)
+      read(iunit)idata(:)
 
-   ! calculate geostationary satellite zenith angle
-   do j = 1, ny
-      do i = 1, nx
-         if ( .not. got_latlon(i,j) ) cycle
-         ! glat, glon, gzen are in [radian] in this routine.
-         call calc_geostationary_satellite_zenith_angle( \
-              glat(i,j), glon(i,j), lon_sat, r_eq, h_sat, gzen(i,j) )
-         glat(i,j) = glat(i,j) * rad2deg
-         glon(i,j) = glon(i,j) * rad2deg
-         gzen(i,j) = gzen(i,j) * rad2deg
-      end do
-   end do
+      startLine = header%segm%startLineNo
+      endLine = startLine + header%data%nLin - 1
+!print*,ifile, trim(fnames(ifile)), header%data%nPix, header%data%nLin, startLine, endLine
+      lon_sat = header%proj%subLon * deg2rad
+      h_sat =  header%proj%satDis * 1000.0
+      r_eq = header%proj%eqtrRadius * 1000.0
+      do jj = 1, header%data%nLin
+         do ii = 1, header%data%nPix
 
-   ! additional info for writing ioda at MPAS mesh !BJJ
-   write(15,*) lon_sat, r_eq, h_sat
+            tbb = missing_r
+            lon = missing_r
+            lat = missing_r
 
-   return
-end subroutine read_GRB_grid
+            ij = ii + (jj-1) * header%data%nPix
+            iline = header%segm%startLineNo + jj - 1
+            ipixel = ii
 
-subroutine read_GRB(ncid, nx, ny, rad, bt, qf, sd, band_id, time_start)                                        ! MRI TODO - make adjustments for HSD format data reading
-   implicit none
-   integer(i_kind),   intent(in)    :: ncid
-   integer(i_kind),   intent(in)    :: nx, ny
-   integer(i_kind),   intent(out)   :: band_id
-   real(r_kind),      intent(out)   :: sd
-   real(r_kind),      intent(inout) :: rad(nx,ny)
-   real(r_kind),      intent(inout) :: bt(nx,ny)
-   integer(i_kind),   intent(inout) :: qf(nx,ny)
-   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
-   integer(i_byte),  allocatable    :: itmp_byte_1d(:)
-   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
-   integer(i_short), allocatable    :: itmp_short_2d(:,:)
-   integer(i_kind)                  :: nf_status
-   integer(i_kind)                  :: istart(2), icount(2)
-   integer(i_kind)                  :: varid, i, j
-   integer(i_short)                 :: ifill
-   real(r_single)                   :: rfill
-   real(r_single)                   :: rtmp
-   real(r_single)                   :: planck_fk1, planck_fk2
-   real(r_single)                   :: planck_bc1, planck_bc2
-   real(r_single)                   :: scalef, offset
-   real(r_kind)                     :: rmiss = -999.0
-   integer(i_kind)                  :: imiss = -999
-   continue
-
-   ! time_start is the same for all bands, but time_end is not
-   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
-   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
-
-   istart(1) = 1
-   icount(1) = 1
-   allocate(itmp_byte_1d(1))
-   nf_status = nf_INQ_VARID(ncid, 'band_id', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:1), icount(1:1), itmp_byte_1d(:))
-   band_id = itmp_byte_1d(1)
-   deallocate(itmp_byte_1d)
-
-   nf_status = nf_INQ_VARID(ncid, 'std_dev_radiance_value_of_valid_pixels', varid)
-   nf_status = nf_GET_VAR_REAL(ncid, varid, rtmp)
-   sd = rtmp
-
-   ! qf (DQF, Data Quality Flag)
-   ! 0:good, 1:conditionally_usable, 2:out_of_range, 3:no_value
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_byte_2d(nx,ny))
-   nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
-   qf(:,:) = imiss
-   do j = 1, ny
-      do i = 1, nx
-         qf(i,j) = itmp_byte_2d(i,j)
-      end do
-   end do
-   deallocate(itmp_byte_2d)
-
-   nf_status = nf_INQ_VARID(ncid, 'planck_fk1', varid)
-   nf_status = nf_GET_VAR_REAL(ncid, varid, planck_fk1)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue',  rfill)
-
-   nf_status = nf_INQ_VARID(ncid, 'planck_fk2', varid)
-   nf_status = nf_GET_VAR_REAL(ncid, varid, planck_fk2)
-
-   nf_status = nf_INQ_VARID(ncid, 'planck_bc1', varid)
-   nf_status = nf_GET_VAR_REAL(ncid, varid, planck_bc1)
-
-   nf_status = nf_INQ_VARID(ncid, 'planck_bc2', varid)
-   nf_status = nf_GET_VAR_REAL(ncid, varid, planck_bc2)
-
-   istart(1) = 1
-   icount(1) = nx
-   istart(2) = 1
-   icount(2) = ny
-   allocate(itmp_short_2d(nx, ny))
-   nf_status = nf_INQ_VARID(ncid, 'Rad', varid)
-   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
-   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
-   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
-   rad(:,:) = rmiss
-   bt(:,:)  = rmiss
-   do j = 1, ny
-      do i = 1, nx
-         if ( itmp_short_2d(i,j) /= ifill ) then
-            if ( itmp_short_2d(i,j) .lt. 0_i_short ) STOP 777
-            rad(i,j) = offset + itmp_short_2d(i,j) * scalef
-            if ( planck_fk1 /= rfill .and. planck_fk2 /= rfill .and. &
-                 planck_bc1 /= rfill .and. planck_bc2 /= rfill ) then
-              if ( rad(i,j) > 0.0 ) then
-               bt(i,j) = (planck_fk2/(log((planck_fk1/rad(i,j))+1.0))-planck_bc1)/planck_bc2
-              end if
+            if ( abs(latitude(ipixel, iline)) > 90.0 .or. &
+                 abs(longitude(ipixel, iline)) > 360.0 ) then
+               call pixlin_to_lonlat(ipixel, iline, lon, lat, ierr)
+               if ( ierr == 0 ) then
+                  valid(ipixel, iline) = .true.
+                  latitude(ipixel, iline) = lat
+                  longitude(ipixel, iline) = lon
+                  call calc_solar_zenith_angle( &
+                     latitude(ipixel, iline), &
+                     longitude(ipixel, iline), &
+                     ihh, imm, jday, &
+                     solzen(ipixel, iline))
+                  ! calculate geostationary satellite zenith angle
+                  rlat = lat * deg2rad ! in radian
+                  rlon = lon * deg2rad ! in radian
+                  lon_diff = abs(rlon-lon_sat)
+                  tmp1 = sqrt((2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
+                         +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2)
+                  theta1 = 2.0*asin(tmp1/r_eq/2.)
+                  theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
+                  satzen(ipixel, iline) = (theta1+theta2) * rad2deg
+                  if ( satzen(ipixel, iline) > 65.0 ) then
+                     valid(ipixel, iline) = .false.
+                  end if
+               end if
             end if
-         end if
-      end do
-   end do
-   deallocate(itmp_short_2d)
 
-   return
-end subroutine read_GRB
+            radcount = idata(ij)
+            if ( radcount /= header%calib%outCount .and. &
+                 radcount /= header%calib%errorCount .and. &
+                 radcount > 0 ) then
+               ! convert count value to radiance
+               radiance = radcount * header%calib%gain_cnt2rad + &
+                          header%calib%cnst_cnt2rad
+               radiance = radiance * 1000000.0  ! [ W/(m^2 sr micro m)] => [ W/(m^2 sr m)]
+               ! convert radiance to physical value
+               ! infrared band
+               ! check header[n]->calib->bandNo
+               call hisd_radiance_to_tbb(radiance, tbb)
+               ! visible or near infrared band
+               !  data->phys[kk] = header[n]->calib->rad2albedo * radiance
+!print*,iband+6, ij, ii, jj, radcount, tbb, lon, lat, solzen(ipixel, iline), satzen(ipixel, iline)
+               brit(ipixel, iline, iband) = tbb
+            end if
+
+         end do ! pixel
+      end do ! line
+
+      deallocate(idata)
+      if ( header%obsTime%obsNum > 0 ) then
+         deallocate(header%obsTime%lineNo)
+         deallocate(header%obsTime%obsMJD)
+      end if
+      if ( header%navicorr%correctNum > 0 ) then
+         deallocate(header%navicorr%lineNo)
+         deallocate(header%navicorr%columnShift)
+         deallocate(header%navicorr%lineShift)
+      end if
+      close(iunit)
+
+   end do
+end do
+
+deallocate (fexist)
+deallocate (fnames)
+
+datetime = ccyy//'-'//mm//'-'//dd//'T'//hh//':'//nn//':00Z'
+read (ccyymmddhhnn,'(i4,4i2)') iyear, imonth, iday, ihour, imin
+isec = 0
+call get_julian_time(iyear, imonth, iday, ihour, imin, isec, gstime, epochtime)
+
+! do superobbing of ahi_himawari observations
+! npixel => x direction => nx
+! nline  => y direction => ny
+if ( do_superob ) then
+  nlocs = 0
+  superob_width = 2*superob_halfwidth+1
+
+  ! start y_loop
+
+  first_boxcenter = superob_halfwidth + 1
+  last_boxcenter_y = superob_width * (nline / superob_width) - superob_halfwidth
+  last_boxcenter_x = superob_width * (npixel / superob_width) - superob_halfwidth
+
+  do iy=first_boxcenter, nline, superob_width
+    valid_loop:      do ix=first_boxcenter, npixel, superob_width
+        if ( .not. valid(ix,iy)) cycle
+        if ( satzen(ix,iy)  > 65.0 ) cycle valid_loop
+        if ( all(brit(ix,iy,:) < 0.0) ) cycle
+        nlocs = nlocs + 1
+    end do valid_loop
+  end do
+
+  write(0,*) 'nlocs = ', nlocs
+  if ( nlocs <= 0 ) then
+    return
+  end if
+
+  !print*,'transfering to xdata'
+
+  allocate(xdata(1,1))
+  nvars = nband
+  xdata(1,1) % nlocs = nlocs
+  xdata(1,1) % nrecs = nlocs
+  xdata(1,1) % nvars = nvars
+  ! allocate and initialize
+  allocate (xdata(1,1)%xinfo_float(nlocs, nvar_info))
+  allocate (xdata(1,1)%xinfo_int  (nlocs, nvar_info))
+  allocate (xdata(1,1)%xinfo_char (nlocs, nvar_info))
+  allocate (xdata(1,1)%xseninfo_float(nlocs, nsen_info))
+  allocate (xdata(1,1)%xseninfo_int  (nvars, nsen_info))
+  allocate (xdata(1,1)%xinfo_int64(nlocs, nvar_info))
+  xdata(1,1)%xinfo_float   (:,:) = missing_r
+  xdata(1,1)%xinfo_int     (:,:) = missing_i
+  xdata(1,1)%xinfo_char    (:,:) = ''
+  xdata(1,1)%xseninfo_float(:,:) = missing_r
+  xdata(1,1)%xseninfo_int  (:,:) = missing_i
+  xdata(1,1)%xinfo_int64   (:,:) = 0
+  if ( nvars > 0 ) then
+     allocate (xdata(1,1)%xfield(nlocs, nvars))
+     xdata(1,1)%xfield(:,:)%val = missing_r
+     xdata(1,1)%xfield(:,:)%qm  = missing_i
+     xdata(1,1)%xfield(:,:)%err = missing_r
+     allocate (xdata(1,1)%var_idx(nvars))
+     do iv = 1, nvars
+        xdata(1,1)%var_idx(iv) = iv
+     end do
+  end if
+
+  iloc = 0
+  y_loop:     do iy=first_boxcenter, nline, superob_width
+  ! start x_loop
+     jbox = iy/superob_width + 1
+     if ( superob_halfwidth .gt. 0 ) then
+        box_bottom = superob_width * (jbox-1) +1
+        box_upper  = superob_width * jbox
+     else
+        box_bottom = superob_width * (jbox-1)
+        box_upper  = superob_width * (jbox-1)
+     end if
+
+     x_loop:      do ix=first_boxcenter, npixel, superob_width
+        if ( .not. valid(ix,iy) ) cycle
+        if ( satzen(ix,iy)  > 65.0 ) cycle x_loop
+        if ( all(brit(ix,iy,:) < 0.0) ) cycle
+
+        ibox = ix/superob_width + 1
+        if ( superob_halfwidth .gt. 0 ) then
+           box_left  = superob_width * (ibox-1) +1 ! will exceed nlatitude/nlongitude if superob_halfwidth = 0
+           box_right = superob_width * ibox
+        else
+           box_left  = superob_width * (ibox-1)
+           box_right = superob_width * (ibox-1)
+        end if
+
+        if ( box_right .gt. npixel ) then
+           box_right = npixel
+        end if
+
+        if ( box_upper .gt. nline ) then
+           box_upper = nline
+        end if
+
+        iloc = iloc + 1
+        ! Super-ob BT for this channel
+        do k = 1, nband
+           nkeep = count(brit(box_left:box_right,box_bottom:box_upper,k) > 0.0 )
+           temp1 = sum  (brit(box_left:box_right,box_bottom:box_upper,k), &
+                         brit(box_left:box_right,box_bottom:box_upper,k) > 0.0 )
+           if (superob_halfwidth .gt.0 .and. nkeep .gt. 0) then
+              tb = temp1 / real(nkeep,8)
+           else
+              ! Extract single pixel BT and radiance value for this channel
+              tb = brit(ix,iy,k)
+           end if
+           bt_sup(ix,iy,k) = tb
+        end do
+  !print*,ix,iy, latitude(ix,iy), longitude(ix,iy), satzen(ix,iy), solzen(ix,iy), bt_sup(ix,iy,2)
+
+        do i = 1, nvar_info
+           if ( type_var_info(i) == nf90_int ) then
+           else if ( type_var_info(i) == nf90_float ) then
+              if ( trim(name_var_info(i)) == 'station_elevation' ) then
+                 xdata(1,1)%xinfo_float(iloc,i) = missing_r
+              else if ( trim(name_var_info(i)) == 'latitude' ) then
+                 xdata(1,1)%xinfo_float(iloc,i) = latitude(ix,iy)
+              else if ( trim(name_var_info(i)) == 'longitude' ) then
+                 xdata(1,1)%xinfo_float(iloc,i) = longitude(ix,iy)
+              end if
+           else if ( type_var_info(i) == nf90_char ) then
+              if ( trim(name_var_info(i)) == 'datetime' ) then
+                 xdata(1,1)%xinfo_char(iloc,i) = datetime
+              else if ( trim(name_var_info(i)) == 'station_id' ) then
+                 xdata(1,1)%xinfo_char(iloc,i) = 'ahi_himawari8'
+              end if
+           else if ( type_var_info(i) == nf90_int64 ) then
+              if ( trim(name_var_info(i)) == 'dateTime' ) then
+                 xdata(1,1)%xinfo_int64(iloc,i) = epochtime
+              end if
+           end if
+        end do
+
+        do i = 1, nsen_info
+           if ( type_sen_info(i) == nf90_float ) then
+              if ( trim(name_sen_info(i)) == 'scan_position' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = ix
+              else if ( trim(name_sen_info(i)) == 'sensor_zenith_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = satzen(ix,iy)
+              else if ( trim(name_sen_info(i)) == 'solar_zenith_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = solzen(ix,iy)
+              else if ( trim(name_sen_info(i)) == 'sensor_azimuth_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = missing_r
+              else if ( trim(name_sen_info(i)) == 'solar_azimuth_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = missing_r
+              else if ( trim(name_sen_info(i)) == 'sensor_view_angle' ) then
+                 !call calc_sensor_view_angle(trim(rlink%inst), rlink%scanpos, xdata(1,1)%xseninfo_float(iloc,i))
+                 xdata(1,1)%xseninfo_float(iloc,i) = satzen(ix,iy)
+              end if
+  !         else if ( type_sen_info(i) == nf90_int ) then
+  !         else if ( type_sen_info(i) == nf90_char ) then
+           end if
+        end do
+
+        iv = ufo_vars_getindex(name_sen_info, 'sensor_channel')
+        xdata(1,1)%xseninfo_int(:,iv) = (/ 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 /)
+
+        do i = 1, nvars
+           xdata(1,1)%xfield(iloc,i)%val = bt_sup(ix,iy,i)
+           xdata(1,1)%xfield(iloc,i)%err = 1.0
+           !call set_brit_obserr(trim(rlink%inst), i, xdata(1,1)%xfield(iloc,i)%err)
+           xdata(1,1)%xfield(iloc,i)%qm  = 0
+        end do
+     end do x_loop
+  end do y_loop
+
+else
+  nlocs = 0
+  do jj = 1, nline , subsample
+     do ii = 1, npixel , subsample
+        if ( valid(ii,jj) ) then
+           nlocs = nlocs + 1
+        end if
+     end do
+  end do
+
+  !print*,'transfering to xdata'
+
+  allocate(xdata(1,1))
+  nvars = nband
+  xdata(1,1) % nlocs = nlocs
+  xdata(1,1) % nrecs = nlocs
+  xdata(1,1) % nvars = nvars
+  ! allocate and initialize
+  allocate (xdata(1,1)%xinfo_float(nlocs, nvar_info))
+  allocate (xdata(1,1)%xinfo_int  (nlocs, nvar_info))
+  allocate (xdata(1,1)%xinfo_char (nlocs, nvar_info))
+  allocate (xdata(1,1)%xseninfo_float(nlocs, nsen_info))
+  allocate (xdata(1,1)%xseninfo_int  (nvars, nsen_info))
+  allocate (xdata(1,1)%xinfo_int64(nlocs, nvar_info))
+  xdata(1,1)%xinfo_float   (:,:) = missing_r
+  xdata(1,1)%xinfo_int     (:,:) = missing_i
+  xdata(1,1)%xinfo_char    (:,:) = ''
+  xdata(1,1)%xseninfo_float(:,:) = missing_r
+  xdata(1,1)%xseninfo_int  (:,:) = missing_i
+  xdata(1,1)%xinfo_int64   (:,:) = 0
+  if ( nvars > 0 ) then
+     allocate (xdata(1,1)%xfield(nlocs, nvars))
+     xdata(1,1)%xfield(:,:)%val = missing_r
+     xdata(1,1)%xfield(:,:)%qm  = missing_i
+     xdata(1,1)%xfield(:,:)%err = missing_r
+     allocate (xdata(1,1)%var_idx(nvars))
+     do iv = 1, nvars
+        xdata(1,1)%var_idx(iv) = iv
+     end do
+  end if
+
+  ! do thinning every subsample pixels
+  do jj = 1, nline, subsample
+     do ii = 1, npixel, subsample
+        if ( .not. valid(ii,jj) ) cycle
+        iloc = iloc + 1
+  !print*,ii,jj, latitude(ii,jj), longitude(ii,jj), satzen(ii,jj), solzen(ii,jj), brit(ii,jj,1)
+
+        do i = 1, nvar_info
+           if ( type_var_info(i) == nf90_int ) then
+           else if ( type_var_info(i) == nf90_float ) then
+              if ( trim(name_var_info(i)) == 'station_elevation' ) then
+                 xdata(1,1)%xinfo_float(iloc,i) = missing_r
+              else if ( trim(name_var_info(i)) == 'latitude' ) then
+                 xdata(1,1)%xinfo_float(iloc,i) = latitude(ii,jj)
+              else if ( trim(name_var_info(i)) == 'longitude' ) then
+                 xdata(1,1)%xinfo_float(iloc,i) = longitude(ii,jj)
+              end if
+           else if ( type_var_info(i) == nf90_char ) then
+              if ( trim(name_var_info(i)) == 'datetime' ) then
+                 xdata(1,1)%xinfo_char(iloc,i) = datetime
+              else if ( trim(name_var_info(i)) == 'station_id' ) then
+                 xdata(1,1)%xinfo_char(iloc,i) = 'ahi_himawari8'
+              end if
+           else if ( type_var_info(i) == nf90_int64 ) then
+              if ( trim(name_var_info(i)) == 'dateTime' ) then
+                 xdata(1,1)%xinfo_int64(iloc,i) = epochtime
+              end if
+           end if
+        end do
+
+        do i = 1, nsen_info
+           if ( type_sen_info(i) == nf90_float ) then
+              if ( trim(name_sen_info(i)) == 'scan_position' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = ii
+              else if ( trim(name_sen_info(i)) == 'sensor_zenith_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = satzen(ii,jj)
+              else if ( trim(name_sen_info(i)) == 'solar_zenith_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = solzen(ii,jj)
+              else if ( trim(name_sen_info(i)) == 'sensor_azimuth_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = missing_r
+              else if ( trim(name_sen_info(i)) == 'solar_azimuth_angle' ) then
+                 xdata(1,1)%xseninfo_float(iloc,i) = missing_r
+              else if ( trim(name_sen_info(i)) == 'sensor_view_angle' ) then
+                 !call calc_sensor_view_angle(trim(rlink%inst), rlink%scanpos, xdata(1,1)%xseninfo_float(iloc,i))
+                 xdata(1,1)%xseninfo_float(iloc,i) = satzen(ii,jj)
+              end if
+  !         else if ( type_sen_info(i) == nf90_int ) then
+  !         else if ( type_sen_info(i) == nf90_char ) then
+           end if
+        end do
+
+        iv = ufo_vars_getindex(name_sen_info, 'sensor_channel')
+        xdata(1,1)%xseninfo_int(:,iv) = (/ 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 /)
+
+        do i = 1, nvars
+           xdata(1,1)%xfield(iloc,i)%val = brit(ii,jj,i)
+           xdata(1,1)%xfield(iloc,i)%err = 1.0
+           !call set_brit_obserr(trim(rlink%inst), i, xdata(1,1)%xfield(iloc,i)%err)
+           xdata(1,1)%xfield(iloc,i)%qm  = 0
+        end do
+     end do
+  end do
+
+end if ! if do_superob
+
+end subroutine read_HSD
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- copied subroutine  [from obs2model] to read dimension information of GOES ABI data
+!
+ 
+! subroutine read_GRB_dims(ncid, nx, ny)                                        ! MRI TODO - make adjustments so that it can be used for HSD
+!    implicit none
+!    integer(i_kind), intent(in)  :: ncid
+!    integer(i_kind), intent(out) :: nx, ny
+!    integer(i_kind)              :: dimid
+!    integer(i_kind)              :: nf_status(4)
+!    continue
+!    nf_status(1) = nf_INQ_DIMID(ncid, 'x', dimid)
+!    nf_status(2) = nf_INQ_DIMLEN(ncid, dimid, nx)
+!    nf_status(3) = nf_INQ_DIMID(ncid, 'y', dimid)
+!    nf_status(4) = nf_INQ_DIMLEN(ncid, dimid, ny)
+!    if ( any(nf_status /= 0) ) then
+!       write(0,*) 'Error reading dimensions'
+!       stop
+!    end if
+!    return
+! end subroutine read_GRB_dims
+
+! ! NC_BYTE 8-bit signed integer
+! ! NC_SHORT 16-bit signed integer
+! ! NC_INT (or NC_LONG) 32-bit signed integer
+! ! NC_FLOAT 32-bit floating point
+! ! NC_DOUBLE 64-bit floating point
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- copied subroutine  [from obs2model] to read grid information for GOES ABI data. Needs further work
+!
+
+! subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)          ! MRI TODO - make adjustments so that it can be used for HSD
+!    implicit none
+!    integer(i_kind), intent(in)    :: ncid
+!    integer(i_kind), intent(in)    :: nx, ny
+!    real(r_kind),    intent(inout) :: glat(nx,ny)
+!    real(r_kind),    intent(inout) :: glon(nx,ny)
+!    real(r_kind),    intent(inout) :: gzen(nx,ny)
+!    logical,         intent(inout) :: got_latlon(nx,ny)
+!    integer(i_kind)                :: varid, i, j
+!    integer(i_kind)                :: nf_status
+!    integer(i_kind)                :: istart(1), icount(1)
+!    integer(i_short), allocatable  :: itmp_short_1d(:)
+!    real(r_kind),     allocatable  :: x(:)
+!    real(r_kind),     allocatable  :: y(:)
+!    real(r_single) :: scalef, offset
+!    real(r_double) :: dtmp
+!    real(r_double) :: r_eq    ! GRS80 semi-major axis of earth
+!    real(r_double) :: r_pol   ! GRS80 semi-minor axis of earth = (1-f)*r_eq
+!    real(r_double) :: lon_sat ! satellite longitude, longitude_of_projection_origin
+!    real(r_double) :: h_sat   ! satellite height
+!    real(r_double) :: a, b, c, rs, sx, sy, sz
+!    real(r_kind)   :: rlat, rlon, lon_diff, tmp1, theta1, theta2
+!    continue
+
+! ! int goes_imager_projection ;
+! !  goes_imager_projection:long_name = "GOES-R ABI fixed grid projection" ;
+! !  goes_imager_projection:grid_mapping_name = "geostationary" ;
+! !  goes_imager_projection:perspective_point_height = 35786023. ;
+! !  goes_imager_projection:semi_major_axis = 6378137. ;
+! !  goes_imager_projection:semi_minor_axis = 6356752.31414 ;
+! !  goes_imager_projection:inverse_flattening = 298.2572221 ;
+! !  goes_imager_projection:latitude_of_projection_origin = 0. ;
+! !  goes_imager_projection:longitude_of_projection_origin = -89.5 ;
+! !  goes_imager_projection:sweep_angle_axis = "x" ;
+
+!    nf_status = nf_INQ_VARID(ncid, 'goes_imager_projection', varid)
+!    nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'semi_major_axis',  dtmp)
+!    r_eq = dtmp
+!    nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'semi_minor_axis',  dtmp)
+!    r_pol = dtmp
+!    nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'perspective_point_height',  dtmp)
+!    h_sat = dtmp + r_eq  ! perspective_point_height + semi_major_axis
+!    nf_status = nf_GET_ATT_DOUBLE(ncid, varid, 'longitude_of_projection_origin',  dtmp)
+!    lon_sat = dtmp * deg2rad
+
+! ! short x(x) ;
+! !  x:scale_factor = 5.6e-05f ;
+! !  x:add_offset = -0.075012f ;
+! !  x:units = "rad" ;
+! !  x:axis = "X" ;
+! !  x:long_name = "GOES fixed grid projection x-coordinate" ;
+
+!    istart(1) = 1
+!    icount(1) = nx
+!    allocate(itmp_short_1d(nx))
+!    nf_status = nf_INQ_VARID(ncid, 'x', varid)
+!    nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:1), icount(1:1), itmp_short_1d(:))
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+!    allocate(x(nx))
+!    do i = 1, nx
+!       x(i) = offset + itmp_short_1d(i) * scalef
+!    end do
+!    deallocate(itmp_short_1d)
+
+! ! short y(y) ;
+! !  y:scale_factor = -5.6e-05f ;
+! !  y:add_offset = 0.126532f ;
+! !  y:units = "rad" ;
+! !  y:axis = "Y" ;
+! !  y:long_name = "GOES fixed grid projection y-coordinate" ;
+! !  y:standard_name = "projection_y_coordinate" ;
+
+!    istart(1) = 1
+!    icount(1) = ny
+!    allocate(itmp_short_1d(ny))
+!    nf_status = nf_INQ_VARID(ncid, 'y', varid)
+!    nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:1), icount(1:1), itmp_short_1d(:))
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+!    allocate(y(ny))
+!    do i = 1, ny
+!       y(i) = offset + itmp_short_1d(i) * scalef
+!    end do
+!    deallocate(itmp_short_1d)
+!    ! Product Definition and User's Guide (PUG) Volume 3, pp. 19-21
+!    ! from fixed grid x/y to geodetic lat/lon
+!    got_latlon(1:nx,1:ny) = .true.
+!    do j = 1, ny
+!       do i = 1, nx
+!          a = sin(x(i))*sin(x(i)) + cos(x(i))*cos(x(i)) * &
+!              (cos(y(j))*cos(y(j))+(r_eq/r_pol)*(r_eq/r_pol)*sin(y(j))*sin(y(j)))
+!          b = -2.0*h_sat*cos(x(i))*cos(y(j))
+!          c = h_sat*h_sat - r_eq*r_eq
+!          if ( (b*b-4.0*a*c) < 0.0 ) then
+!             got_latlon(i,j) = .false.
+!             cycle
+!          end if
+!          rs = (-1.0*b - sqrt(b*b-4.0*a*c)) / (2.0*a)
+!          sx = rs * cos(x(i)) * cos(y(j))
+!          sy = -1.0 * rs * sin(x(i))
+!          sz = rs * cos(x(i)) * sin(y(j))
+!          !glat(i,j) = (atan((r_eq/r_pol)*(r_eq/r_pol)*(sz/sqrt((h_sat-sx)*(h_sat-sx)+sy*sy)))) * rad2deg
+!          !glon(i,j) = (lon_sat - atan(sy/(h_sat-sx))) * rad2deg
+!          glat(i,j) = atan((r_eq/r_pol)*(r_eq/r_pol)*(sz/sqrt((h_sat-sx)*(h_sat-sx)+sy*sy)))
+!          glon(i,j) = lon_sat - atan(sy/(h_sat-sx))
+!       end do
+!    end do
+
+!    deallocate(x)
+!    deallocate(y)
+
+!    ! calculate geostationary satellite zenith angle
+!    do j = 1, ny
+!       do i = 1, nx
+!          if ( .not. got_latlon(i,j) ) cycle
+!          ! glat, glon, gzen are in [radian] in this routine.
+!          call calc_geostationary_satellite_zenith_angle( \
+!               glat(i,j), glon(i,j), lon_sat, r_eq, h_sat, gzen(i,j) )
+!          glat(i,j) = glat(i,j) * rad2deg
+!          glon(i,j) = glon(i,j) * rad2deg
+!          gzen(i,j) = gzen(i,j) * rad2deg
+!       end do
+!    end do
+
+!    ! additional info for writing ioda at MPAS mesh !BJJ
+!    write(15,*) lon_sat, r_eq, h_sat
+
+!    return
+! end subroutine read_GRB_grid
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- copied subroutine  [from obs2model] to read GOES ABI data. Needs further work
+!
+
+! subroutine read_GRB(ncid, nx, ny, rad, bt, qf, sd, band_id, time_start)                                        ! MRI TODO - make adjustments for HSD format data reading
+!    implicit none
+!    integer(i_kind),   intent(in)    :: ncid
+!    integer(i_kind),   intent(in)    :: nx, ny
+!    integer(i_kind),   intent(out)   :: band_id
+!    real(r_kind),      intent(out)   :: sd
+!    real(r_kind),      intent(inout) :: rad(nx,ny)
+!    real(r_kind),      intent(inout) :: bt(nx,ny)
+!    integer(i_kind),   intent(inout) :: qf(nx,ny)
+!    character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+!    integer(i_byte),  allocatable    :: itmp_byte_1d(:)
+!    integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+!    integer(i_short), allocatable    :: itmp_short_2d(:,:)
+!    integer(i_kind)                  :: nf_status
+!    integer(i_kind)                  :: istart(2), icount(2)
+!    integer(i_kind)                  :: varid, i, j
+!    integer(i_short)                 :: ifill
+!    real(r_single)                   :: rfill
+!    real(r_single)                   :: rtmp
+!    real(r_single)                   :: planck_fk1, planck_fk2
+!    real(r_single)                   :: planck_bc1, planck_bc2
+!    real(r_single)                   :: scalef, offset
+!    real(r_kind)                     :: rmiss = -999.0
+!    integer(i_kind)                  :: imiss = -999
+!    continue
+
+!    ! time_start is the same for all bands, but time_end is not
+!    nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+!    !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+!    istart(1) = 1
+!    icount(1) = 1
+!    allocate(itmp_byte_1d(1))
+!    nf_status = nf_INQ_VARID(ncid, 'band_id', varid)
+!    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:1), icount(1:1), itmp_byte_1d(:))
+!    band_id = itmp_byte_1d(1)
+!    deallocate(itmp_byte_1d)
+
+!    nf_status = nf_INQ_VARID(ncid, 'std_dev_radiance_value_of_valid_pixels', varid)
+!    nf_status = nf_GET_VAR_REAL(ncid, varid, rtmp)
+!    sd = rtmp
+
+!    ! qf (DQF, Data Quality Flag)
+!    ! 0:good, 1:conditionally_usable, 2:out_of_range, 3:no_value
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_byte_2d(nx,ny))
+!    nf_status = nf_INQ_VARID(ncid, 'DQF', varid)
+!    nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+!    qf(:,:) = imiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          qf(i,j) = itmp_byte_2d(i,j)
+!       end do
+!    end do
+!    deallocate(itmp_byte_2d)
+
+!    nf_status = nf_INQ_VARID(ncid, 'planck_fk1', varid)
+!    nf_status = nf_GET_VAR_REAL(ncid, varid, planck_fk1)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue',  rfill)
+
+!    nf_status = nf_INQ_VARID(ncid, 'planck_fk2', varid)
+!    nf_status = nf_GET_VAR_REAL(ncid, varid, planck_fk2)
+
+!    nf_status = nf_INQ_VARID(ncid, 'planck_bc1', varid)
+!    nf_status = nf_GET_VAR_REAL(ncid, varid, planck_bc1)
+
+!    nf_status = nf_INQ_VARID(ncid, 'planck_bc2', varid)
+!    nf_status = nf_GET_VAR_REAL(ncid, varid, planck_bc2)
+
+!    istart(1) = 1
+!    icount(1) = nx
+!    istart(2) = 1
+!    icount(2) = ny
+!    allocate(itmp_short_2d(nx, ny))
+!    nf_status = nf_INQ_VARID(ncid, 'Rad', varid)
+!    nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+!    nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+!    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+!    rad(:,:) = rmiss
+!    bt(:,:)  = rmiss
+!    do j = 1, ny
+!       do i = 1, nx
+!          if ( itmp_short_2d(i,j) /= ifill ) then
+!             if ( itmp_short_2d(i,j) .lt. 0_i_short ) STOP 777
+!             rad(i,j) = offset + itmp_short_2d(i,j) * scalef
+!             if ( planck_fk1 /= rfill .and. planck_fk2 /= rfill .and. &
+!                  planck_bc1 /= rfill .and. planck_bc2 /= rfill ) then
+!               if ( rad(i,j) > 0.0 ) then
+!                bt(i,j) = (planck_fk2/(log((planck_fk1/rad(i,j))+1.0))-planck_bc1)/planck_bc2
+!               end if
+!             end if
+!          end if
+!       end do
+!    end do
+!    deallocate(itmp_short_2d)
+
+!    return
+! end subroutine read_GRB
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- this subroutine [copied from obs2model] will be modified so that it can be used to read and convert L1 HSD data
+!
 
 subroutine read_L1_HSD(ncid, nx, ny, cm, time_start)                     ! MRI TODO - adjust this section in a way that is applicable to HSD data. ref: existing code (hsd.F90 in obs2ioda)
    implicit none
@@ -1051,6 +1671,12 @@ subroutine read_L1_HSD(ncid, nx, ny, cm, time_start)                     ! MRI T
 
    return
 end subroutine read_L1_HSD
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- this subroutine [copied from obs2model] reads L2 TEMP data for GOES. we are not using it for AHI data at the moment so turned off
+!
 
 ! subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)                         ! MRI commented out because we are not using TEMP at the moment
 !    implicit none
@@ -1139,6 +1765,12 @@ end subroutine read_L1_HSD
 !    return
 ! end subroutine read_L2_TEMP
 
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- this subroutine [copied from obs2model] reads L2 Phase data for GOES. we are not using it for AHI data at the moment so turned off
+!
+
 ! subroutine read_L2_Phase(ncid, nx, ny, ctph, time_start)              ! MRI commented out because we are not using L2_Phase at the moment
 !    implicit none
 !    integer(i_kind),   intent(in)    :: ncid
@@ -1192,6 +1824,12 @@ end subroutine read_L1_HSD
 
 !    return
 ! end subroutine read_L2_Phase
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- this subroutine [copied from obs2model] reads L2 HT data for GOES. we are not using it for AHI data at the moment so turned off
+!
 
 ! subroutine read_L2_HT(ncid, nx, ny, cth, time_start)                  ! MRI commented out because we are not using HT at the moment
 !    implicit none
@@ -1280,6 +1918,12 @@ end subroutine read_L1_HSD
 !    return
 ! end subroutine read_L2_HT
 
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- this subroutine [copied from obs2model] reads L2 PRES data for GOES. we are not using it for AHI data at the moment so turned off
+!
+
 ! subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)                   ! MRI commented out because we are not using PRES at the moment
 !    implicit none
 !    integer(i_kind),   intent(in)    :: ncid
@@ -1366,6 +2010,12 @@ end subroutine read_L1_HSD
 
 !    return
 ! end subroutine read_L2_PRES
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- this subroutine [copied from obs2model] decodes filename and retrieve necessary information on observation
+!
 
 ! subroutine decode_hsd_fname(fname, finfo, scan_mode, is_HSD, is_TEMP, is_Phase, &                      ! original
 !                            is_HT, is_PRES, band_id, sat_id, start_time, jday)
@@ -1472,6 +2122,12 @@ subroutine decode_hsd_fname(fname, finfo, scan_mode, is_HSD, band_id, sat_id, st
    return
 end subroutine decode_hsd_fname
 
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- copied subroutine  [from obs2model] to get observation datetime information. Needs further work
+!
+
 subroutine get_date(ccyy, jday, month, day)                                                  ! MRI TODO - use this one if works as expected. if not, use the one I built
    implicit none
    integer(i_kind), intent(in)  :: ccyy, jday
@@ -1502,6 +2158,12 @@ subroutine get_date(ccyy, jday, month, day)                                     
 
    return
 end subroutine get_date
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- copied subroutine [from obs2model] to write output data. Needs further work
+!
 
 subroutine output_iodav1(fname, time_start, nx, ny, nband, got_latlon, lat, lon, sat_zen, sun_zen, bt, qf, sdtb, cloudmask)            ! MRI TODO - check if we need any change for HSD
 
@@ -1703,6 +2365,12 @@ subroutine output_iodav1(fname, time_start, nx, ny, nband, got_latlon, lat, lon,
    deallocate (qf_out)
 
 end subroutine output_iodav1
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- copied subroutine  [from obs2model] to write output data in model grid. Needs further work
+!
 
 subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon, sat_zen, sun_zen, bt, bt_std)                      ! MRI TODO - check if we need any change for HSD
 
@@ -1918,7 +2586,12 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
 
 end subroutine output_iodav1_o2m
 
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
 ! MRI - copied subroutine to convert pixlin to latlon for hsd.f90 [obs2ioda-v2]
+!
+
 subroutine pixlin_to_lonlat(pix, lin, lon, lat, ierr)
 
  implicit none
@@ -2003,7 +2676,12 @@ subroutine pixlin_to_lonlat(pix, lin, lon, lat, ierr)
  return
 end subroutine pixlin_to_lonlat
 
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
 ! MRI - copied subroutine to compute solar zenith angle for hsd.f90 [obs2ioda-v2]
+!
+
 subroutine calc_solar_zenith_angle(xlat, xlon, gmt, minute, julian, solzen)
 
 ! the calulcation is adapted from subroutines radconst and calc_coszen in
@@ -2030,6 +2708,9 @@ subroutine calc_solar_zenith_angle(xlat, xlon, gmt, minute, julian, solzen)
 
  declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad)) ! in radian
 
+ read(xtime(12:13), '(i2)') gmt
+ read(xtime(15:16), '(i2)') minute
+
  da = 6.2831853071795862*(julian-1)/365.
  eot = (0.000075+0.001868*cos(da)-0.032077*sin(da) &
         -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)
@@ -2046,7 +2727,12 @@ subroutine calc_solar_zenith_angle(xlat, xlon, gmt, minute, julian, solzen)
  return
 end subroutine calc_solar_zenith_angle
 
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
 ! MRI - commented out subroutine to compute solar zenith angle for obs2model 
+!
+
 ! subroutine calc_solar_zenith_angle(nx, ny, xlat, xlon, xtime, julian, solzen, got_latlon)
 
 ! ! the calulcation is adapted from subroutines radconst and calc_coszen in
@@ -2060,81 +2746,99 @@ end subroutine calc_solar_zenith_angle
 !    real(r_kind),      intent(inout) :: solzen(nx,ny)
 !    logical,           intent(in)    :: got_latlon(nx,ny)
 
-!    real(r_kind) :: obliq = 23.5
-!    real(r_kind) :: deg_per_day = 360.0/365.0
-!    real(r_kind) :: slon   ! longitude of the sun
-!    real(r_kind) :: declin ! declination of the sun
+!    real(r_kind) :: obliq = 23.5                                    ! MRI -- same in obs2ioda and obs2model 
+!    real(r_kind) :: deg_per_day = 360.0/365.0                       ! MRI -- same in obs2ioda and obs2model 
+!    real(r_kind) :: slon   ! longitude of the sun                   ! MRI -- same in obs2ioda and obs2model 
+!    real(r_kind) :: declin ! declination of the sun                 ! MRI -- same in obs2ioda and obs2model 
 !    real(r_kind) :: hrang, da, eot, xt, tloctm, rlat
 !    integer(i_kind) :: gmt, minute, i, j
 
 !    ! calculate longitude of the sun from vernal equinox
-!    if ( julian >= 80 ) slon = (julian - 80 ) * deg_per_day
-!    if ( julian <  80 ) slon = (julian + 285) * deg_per_day
+!    if ( julian >= 80 ) slon = (julian - 80 ) * deg_per_day         ! MRI -- same in obs2ioda and obs2model 
+!    if ( julian <  80 ) slon = (julian + 285) * deg_per_day         ! MRI -- same in obs2ioda and obs2model 
 
-!    declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad)) ! in radian
+!    declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad))             ! MRI -- same in obs2ioda and obs2model 
 
-!    read(xtime(12:13), '(i2)') gmt
-!    read(xtime(15:16), '(i2)') minute
+!    read(xtime(12:13), '(i2)') gmt                                  ! MRI -- present in obs2model but not in obs2ioda
+!    read(xtime(15:16), '(i2)') minute                               ! MRI -- present in obs2model but not in obs2ioda
 
-!    da = 6.2831853071795862*(julian-1)/365.
+!    da = 6.2831853071795862*(julian-1)/365.                         ! MRI -- same in obs2ioda and obs2model 
 !    eot = (0.000075+0.001868*cos(da)-0.032077*sin(da) &
-!           -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)
-!    xt = gmt + (minute + eot)/60.0
+!           -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)      ! MRI -- same in obs2ioda and obs2model 
+!    xt = gmt + (minute + eot)/60.0                                  ! MRI -- same in obs2ioda and obs2model 
 
+!    MRI -- this loop is implemented differently in hsd.f90 subroutine
 !    do j = 1, ny
 !       do i = 1, nx
 !          if ( .not. got_latlon(i,j) ) cycle
-!          tloctm = xt + xlon(i,j)/15.0
-!          hrang = 15.0*(tloctm-12.0) * deg2rad
-!          rlat = xlat(i,j) * deg2rad
+!          tloctm = xt + xlon(i,j)/15.0                              ! MRI -- same in obs2ioda and obs2model  [except xlon for xlon(i,j)]
+!          hrang = 15.0*(tloctm-12.0) * deg2rad                      ! MRI -- same in obs2ioda and obs2model 
+!          rlat = xlat(i,j) * deg2rad                                ! MRI -- same in obs2ioda and obs2model  [except xlat for xlat(i,j)]
 !          solzen(i,j) = acos( sin(rlat)*sin(declin) + &
-!                              cos(rlat)*cos(declin)*cos(hrang) )
-!          solzen(i,j) = solzen(i,j) * rad2deg
+!                              cos(rlat)*cos(declin)*cos(hrang) )    ! MRI -- same in obs2ioda and obs2model [except solzen for solzen(i,j)]
+!          solzen(i,j) = solzen(i,j) * rad2deg                       ! MRI -- same in obs2ioda and obs2model [except solzen for solzen(i,j)]
 !       end do
 !    end do
 
 !    return
 ! end subroutine calc_solar_zenith_angle
 
-!     This subroutine handles errors by printing an error message and
-!     exiting with a non-zero status.
-  subroutine check(errcode)
-    use netcdf
-    implicit none
-    integer, intent(in) :: errcode
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- initially disabling this subroutine. once obs2model works with HSD data, it will be reinstated 
+!
+
+! !     This subroutine handles errors by printing an error message and
+! !     exiting with a non-zero status.
+!   subroutine check(errcode)
+!     use netcdf
+!     implicit none
+!     integer, intent(in) :: errcode
     
-    if(errcode /= nf90_noerr) then
-       print *, 'Error: ', trim(nf90_strerror(errcode))
-       stop 2
-    end if
-  end subroutine check
+!     if(errcode /= nf90_noerr) then
+!        print *, 'Error: ', trim(nf90_strerror(errcode))
+!        stop 2
+!     end if
+!   end subroutine check
 
-subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq, h_sat, rzen )           ! MRI TODO - check if we need any change for HSD
-   implicit none
-   real(r_kind),   intent(in)  :: rlat    ! in [radian]
-   real(r_kind),   intent(in)  :: rlon    ! in [radian]
-   real(r_double), intent(in)  :: lon_sat ! satellite longitude, longitude_of_projection_origin
-   real(r_double), intent(in)  :: r_eq    ! GRS80 semi-major axis of earth
-   real(r_double), intent(in)  :: h_sat   ! satellite height
-   real(r_kind),   intent(out) :: rzen    ! in [radian]
-   real(r_kind) :: lon_diff, tmp1, theta1, theta2
+! -------------------------------------------------------------------------------------------------------------------------------------------
 
-   lon_diff = abs(rlon-lon_sat)
-!   tmp1 = sqrt((2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
-!     +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2)
-   tmp1 = (2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
-     +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2
-   if ( tmp1 < 0.0 ) return
-   tmp1 = sqrt(tmp1)
-   theta1 = 2.0*asin(tmp1/r_eq/2.)
-   theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
-   rzen = theta1+theta2
-   ! gzen(i,j) = 90.0 - atan((cos(lon_diff)*cos(rlat)-0.1512)/(sqrt(1.0-cos(lon_diff)*cos(lon_diff)*cos(rlat)*cos(rlat)))) * rad2deg
+!
+! MRI -- this subroutine is not present in obs2ioda [hsd.f90]. so trying to see if we can convert HSD data without using it
+!
 
-   return
-end subroutine calc_geostationary_satellite_zenith_angle
+! subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq, h_sat, rzen )
+!    implicit none
+!    real(r_kind),   intent(in)  :: rlat    ! in [radian]
+!    real(r_kind),   intent(in)  :: rlon    ! in [radian]
+!    real(r_double), intent(in)  :: lon_sat ! satellite longitude, longitude_of_projection_origin
+!    real(r_double), intent(in)  :: r_eq    ! GRS80 semi-major axis of earth
+!    real(r_double), intent(in)  :: h_sat   ! satellite height
+!    real(r_kind),   intent(out) :: rzen    ! in [radian]
+!    real(r_kind) :: lon_diff, tmp1, theta1, theta2
 
-! MRI - this subroutine to calculate brightness temperature was copied from hsd.f90 [obs2ioda-v2]
+!    lon_diff = abs(rlon-lon_sat)
+! !   tmp1 = sqrt((2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
+! !     +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2)
+!    tmp1 = (2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
+!      +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2
+!    if ( tmp1 < 0.0 ) return
+!    tmp1 = sqrt(tmp1)
+!    theta1 = 2.0*asin(tmp1/r_eq/2.)
+!    theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
+!    rzen = theta1+theta2
+!    ! gzen(i,j) = 90.0 - atan((cos(lon_diff)*cos(rlat)-0.1512)/(sqrt(1.0-cos(lon_diff)*cos(lon_diff)*cos(rlat)*cos(rlat)))) * rad2deg
+
+!    return
+! end subroutine calc_geostationary_satellite_zenith_angle
+
+! -------------------------------------------------------------------------------------------------------------------------------------------
+
+!
+! MRI -- this subroutine to calculate brightness temperature was copied from hsd.f90 [obs2ioda-v2]
+!
+
 subroutine hisd_radiance_to_tbb (radiance, tbb)
 
  implicit none

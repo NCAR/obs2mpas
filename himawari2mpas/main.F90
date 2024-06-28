@@ -11,6 +11,8 @@ program  main
    use atlas_module, only: atlas_geometry, atlas_indexkdtree
    use mod_goes_abi, only: Goes_ReBroadcast_converter, calc_geostationary_satellite_zenith_angle, &
                            calc_solar_zenith_angle, output_iodav1_o2m
+   use mod_himawari_ahi, only: Himawari_AHI_converter, hisd_radiance_to_tbb, pixlin_to_lonlat, &
+                           calc_solar_zenith_angle, output_iodav1_o2m
    use mod_read_write_mpas, only: read_mpas_latlon, write_to_mpas
    use mod_read_write_indx, only: read_indx, write_indx
 

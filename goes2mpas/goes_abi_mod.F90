@@ -27,6 +27,7 @@ module  mod_goes_abi
    use netcdf_mod, only: open_netcdf_for_write, close_netcdf, &
       def_netcdf_dims, def_netcdf_var, def_netcdf_end, &
       put_netcdf_var, missing_r
+
    use control_para !BJJ
 
    implicit none

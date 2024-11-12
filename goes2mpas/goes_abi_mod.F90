@@ -27,7 +27,6 @@ module  mod_goes_abi
    use netcdf_mod, only: open_netcdf_for_write, close_netcdf, &
       def_netcdf_dims, def_netcdf_var, def_netcdf_end, &
       put_netcdf_var, missing_r
-
    use control_para !BJJ
 
    implicit none
@@ -828,6 +827,7 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
    real(r_single)                   :: scalef, offset
    integer(i_kind)                  :: qf(nx,ny)
    character(len=4)                 :: l_unsigned
+   integer(i_kind)                  :: xtype
    continue
 
    ! time_start is the same for all bands, but time_end is not
@@ -861,6 +861,9 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
    nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
+   nf_status = nf_INQ_VARTYPE(ncid, varid, xtype)
+   if( nf_status .eq. 0 ) write(*,*) "---- xtype = ", xtype
+   if( xtype .eq. nf_ushort ) l_unsigned = "true"  ! nf_ushort is defined in "netcdf.inc"
    ! convert unsigned short to signed short
    if( l_unsigned == "true" ) then
       allocate(itmp_2d(nx,ny))
@@ -969,6 +972,7 @@ subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
    real(r_single)                   :: scalef, offset
    integer(i_kind)                  :: qf(nx,ny)
    character(len=4)                 :: l_unsigned
+   integer(i_kind)                  :: xtype
    continue
 
    ! time_start is the same for all bands, but time_end is not
@@ -1002,6 +1006,9 @@ subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
    nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned 
+   nf_status = nf_INQ_VARTYPE(ncid, varid, xtype)
+   if( nf_status .eq. 0 ) write(*,*) "---- xtype = ", xtype
+   if( xtype .eq. nf_ushort ) l_unsigned = "true"  ! nf_ushort is defined in "netcdf.inc"
    ! convert unsigned short to signed short
    if( l_unsigned == "true" ) then
       allocate(itmp_2d(nx,ny))
@@ -1056,6 +1063,7 @@ subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
    real(r_single)                   :: scalef, offset
    integer(i_kind)                  :: qf(nx,ny)
    character(len=4)                 :: l_unsigned
+   integer(i_kind)                  :: xtype
    continue
 
    ! time_start is the same for all bands, but time_end is not
@@ -1089,6 +1097,9 @@ subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
    nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
    nf_status = nf_GET_ATT_TEXT(ncid, varid, '_Unsigned', l_unsigned)
    if( nf_status .eq. 0 ) write(*,*) "---- Attribute @_Unsigned = ",l_unsigned
+   nf_status = nf_INQ_VARTYPE(ncid, varid, xtype)
+   if( nf_status .eq. 0 ) write(*,*) "---- xtype = ", xtype
+   if( xtype .eq. nf_ushort ) l_unsigned = "true"  ! nf_ushort is defined in "netcdf.inc"
    ! convert unsigned short to signed short
    if( l_unsigned == "true" ) then
       allocate(itmp_2d(nx,ny))

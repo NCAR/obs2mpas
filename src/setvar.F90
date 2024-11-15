@@ -21,6 +21,10 @@ module control_para
    implicit none
    save
 
+   real,    parameter :: missing_r = -999.0
+   integer, parameter :: missing_i = -999
+   integer, parameter :: nstring = 50
+
    real*8, parameter :: pi      = dacos(-1.d0)
    real*8, parameter :: deg2rad = pi/180.0d0
    real*8, parameter :: rad2deg = 180.0d0/pi

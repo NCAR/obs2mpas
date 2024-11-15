@@ -1,8 +1,8 @@
 #!/bin/csh
-#PBS -N peakmem
-#PBS -A NMMM0015
-#PBS -l walltime=03:00:00
-#PBS -q regular
+#PBS -N obs2model_abi
+#PBS -A NMMM0043
+#PBS -l walltime=00:10:00
+#PBS -q develop
 #PBS -j oe
 #PBS -k eod
 #PBS -m abe
@@ -31,10 +31,5 @@ module load jedi-fv3-env jedi-mpas-env soca-env
 ulimit -s unlimited
 export GFORTRAN_CONVERT_UNIT='big_endian:101-200'
 
-
-
-module load peak_memusage
-
-
-peak_memusage.exe ./goes2mpas.x
+mpiexec ./goes2mpas.x
 

@@ -36,12 +36,12 @@ subroutine get_namelist_vars(nfile, fnames, list_files, data_dir, data_id, sat_i
 
    ! initialize namelist variables from namelist.obs2model
    ! &data_nml
-   !    nc_list_file = 'flist.txt'             ! list of file names (no path)
+   !    list_files = 'flist.txt'               ! list of file names (no path)
    !    data_dir = '/data/goes/or/himawari',   ! path of the observation files
    !    data_id = '<HS> <OR_ABI-L1b-RadC-M3>', ! prefix of the downloaded files
    !    sat_id = '<H08> <G16> <G18>',          ! satellite ID
    !    n_subsample = 1,                 ! value use for thinning if write_iodav1 = .true.
-   !    write_iodav1 = .false.,          ! option to write out an iodav2 file (no superobbing)
+   !    write_iodav1 = .false.,          ! option to write out an iodav1 file (no superobbing)
    !    /
 
    ! initialize namelist variable
@@ -126,6 +126,40 @@ subroutine get_date(ccyy, jday, month, day)
 
    return
 end subroutine get_date
+
+subroutine get_julian_time(year,month,day,hour,minute,second,gstime,epoch)
+
+! from WRFDA/var/da/da_tools/da_get_julian_time.inc
+
+   implicit none
+
+   integer(i_kind), intent(in)  :: year
+   integer(i_kind), intent(in)  :: month
+   integer(i_kind), intent(in)  :: day
+   integer(i_kind), intent(in)  :: hour
+   integer(i_kind), intent(in)  :: minute
+   integer(i_kind), intent(in)  :: second
+   integer(i_kind), intent(out) :: gstime
+   integer(i_llong), intent(out), optional :: epoch
+
+   integer(i_kind) :: iw3jdn, ndays
+
+   iw3jdn  =    day - 32075 &
+              + 1461 * (year + 4800 + (month - 14) / 12) / 4 &
+              + 367 * (month - 2 - (month - 14) / 12 * 12) / 12 &
+              - 3 * ((year + 4900 + (month - 14) / 12) / 100) / 4
+   ndays = iw3jdn - 2443510
+
+   gstime = ndays*1440.0 + hour*60.0 + minute*1.0
+
+   if ( present(epoch) ) then
+     ! since 1978-01-01
+     epoch = (ndays*1440 + hour*60 + minute)*60 + second
+     ! since 1970-01-01
+     epoch = epoch + 252460800
+   end if
+
+end subroutine get_julian_time
 
 subroutine output_iodav1( fname, time_start, nx, ny, nband, n_subsample, got_latlon, lat, lon, sat_zen, sun_zen, bt, qf, sdtb, cloudmask )
 
@@ -629,5 +663,66 @@ subroutine calc_geostationary_satellite_zenith_angle( rlat, rlon, lon_sat, r_eq,
 
    return
 end subroutine calc_geostationary_satellite_zenith_angle
+
+subroutine calc_solar_zenith_angle_h(xlat, xlon, gmt, minute, julian, solzen)
+
+! the calulcation is adapted from subroutines radconst and calc_coszen in
+! WRF phys/module_radiation_driver.F
+
+ implicit none
+
+ real(r_single),  intent(in)    :: xlat, xlon
+ integer(i_kind), intent(in)    :: gmt, minute, julian
+ real(r_single),  intent(inout) :: solzen
+
+ real(r_single) :: obliq = 23.5
+ real(r_single) :: deg_per_day = 360.0/365.0
+ real(r_single) :: slon   ! longitude of the sun
+ real(r_single) :: declin ! declination of the sun
+ real(r_single) :: hrang, da, eot, xt, tloctm, rlat
+
+ ! initialize to missing values
+ solzen = missing_r
+
+ ! calculate longitude of the sun from vernal equinox
+ if ( julian >= 80 ) slon = (julian - 80 ) * deg_per_day
+ if ( julian <  80 ) slon = (julian + 285) * deg_per_day
+
+ declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad)) ! in radian
+
+ da = 6.2831853071795862*(julian-1)/365.
+ eot = (0.000075+0.001868*cos(da)-0.032077*sin(da) &
+        -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)
+ xt = gmt + (minute + eot)/60.0
+
+ if ( abs(xlon) > 360.0 .or. abs(xlat) > 90.0 ) return
+ tloctm = xt + xlon/15.0
+ hrang = 15.0*(tloctm-12.0) * deg2rad
+ rlat = xlat * deg2rad
+ solzen = acos( sin(rlat)*sin(declin) + &
+                cos(rlat)*cos(declin)*cos(hrang) )
+ solzen = solzen * rad2deg
+
+ return
+end subroutine calc_solar_zenith_angle_h
+
+subroutine set_ahi_obserr(name_inst, nchan, obserrors)
+   implicit none
+
+   character(len=*), intent(in)  :: name_inst  ! instrument name
+   integer(i_kind),  intent(in)  :: nchan      ! channel number
+   real(r_kind),     intent(out) :: obserrors(nchan)
+   obserrors(:) = missing_r
+   if ( name_inst(1:3) == 'ahi' ) then
+      select case ( trim(name_inst) )
+         case ( 'ahi_himawari8' )
+            obserrors = (/ 2.2, 3.0, 2.5, 2.2, 2.2, 2.2, 2.2, 2.2, 2.2, 2.2 /)
+         case default
+            return
+      end select
+   else
+      return
+   end if
+end subroutine set_ahi_obserr
 
 end module utils_mod

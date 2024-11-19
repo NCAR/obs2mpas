@@ -41,4 +41,8 @@ module control_para
    integer, parameter  :: r_kind   = r_single               ! default real
 !BJJ   integer, parameter  :: r_kind   = r_double               ! default real
 
+   integer, parameter, private :: llong_t = selected_int_kind(16)     ! llong integer
+   integer, parameter, public  :: i_llong = max( llong_t, i_long )
+
+
 end module control_para

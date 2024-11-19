@@ -15,13 +15,14 @@ module  mod_goes_abi
 !    (1) flist.txt: contains a list of nc files (exclude path) to be processed
 !                     GoesReBroadcast file
 !                     (optional) Clear Sky Mask output of cspp-geo-aitf package
-!    (2) namelist.goes_abi_converter
+!    (2) namelist.obs2model
 !        &data_nml
-!          nc_list_file = 'flist.txt'
-!          data_dir = '/data/goes',         ! path of the GRB nc files
-!          data_id = 'OR_ABI-L1b-RadC-M3'   ! prefix of the downloaded GRB nc files
-!          sat_id = 'G16'
-!          n_subsample = 1
+!          list_files = 'flist.txt'        ! list of files
+!          data_dir = '/data/goes',        ! path of the GRB nc files
+!          data_id = 'OR_ABI-L1b-RadC-M3', ! prefix of the downloaded GRB nc files
+!          sat_id = 'G16',                 ! satellite ID
+!          n_subsample = 1,                ! value use for thinning if write_iodav1 = .true.
+!          write_iodav1 = .false.,         ! option to write out an iodav1 file (no superobbing)
 !        /
 
    use control_para !BJJ
@@ -94,7 +95,7 @@ module  mod_goes_abi
    contains
 
 
-   subroutine Goes_ReBroadcast_converter (glon_out, glat_out, F_out, varname_out, got_latlon_out)
+subroutine Goes_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out, got_latlon_out)
 
    implicit none
    real(r_kind),      allocatable, intent(out) :: glon_out(:,:)
@@ -115,7 +116,7 @@ module  mod_goes_abi
    integer(i_kind)                 :: n_subsample
    logical                         :: write_iodav1
 
-   ! get bamelist variables
+   ! get namelist variables
    call get_namelist_vars(nfile, nc_fnames, nc_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1)
 
    allocate (ftime_id(nfile))
@@ -128,7 +129,7 @@ module  mod_goes_abi
    allocate (is_Phase(nfile)) !BJJ
    allocate (is_HT(nfile)) !BJJ
    allocate (is_PRES(nfile)) !BJJ
-   valid( :) = .false.
+   valid(:) = .false.
    is_BCM(:) = .false.
    is_TEMP(:) = .false.
    is_Phase(:) = .false.
@@ -425,7 +426,7 @@ module  mod_goes_abi
    deallocate(is_HT) !BJJ
    deallocate(is_PRES) !BJJ
 
- end subroutine Goes_ReBroadcast_converter
+end subroutine Goes_ReBroadcast_converter
 
  
 subroutine read_GRB_dims(ncid, nx, ny)

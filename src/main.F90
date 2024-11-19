@@ -10,8 +10,9 @@ program  main
    use control_para, only : tval, pi, rad2deg, deg2rad
    use atlas_module, only: atlas_geometry, atlas_indexkdtree
    use mod_goes_abi, only: Goes_ReBroadcast_converter
-   use utils_mod,    only: calc_geostationary_satellite_zenith_angle, &
-                           calc_solar_zenith_angle, output_iodav1_o2m
+   use mod_himawari_ahi, only: Himawari_ReBroadcast_converter
+   use utils_mod, only: calc_geostationary_satellite_zenith_angle, &
+                        calc_solar_zenith_angle, output_iodav1_o2m
    use mod_read_write_mpas, only: read_mpas_latlon, write_to_mpas
    use mod_read_write_indx, only: read_indx, write_indx
 
@@ -135,7 +136,7 @@ program  main
    if ( do_abi ) then
       call Goes_ReBroadcast_converter ( lon_s, lat_s, field_s, varname_s, l_latlon )
    else if ( do_ahi ) then
-      call Goes_ReBroadcast_converter ( lon_s, lat_s, field_s, varname_s, l_latlon )
+      call Himawari_ReBroadcast_converter ( lon_s, lat_s, field_s, varname_s, l_latlon )
    else
       write(*,*) 'Error: observation type not supported'
       stop

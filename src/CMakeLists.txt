@@ -11,6 +11,7 @@ set( obs2model_src
 	setvar.F90 
 	netcdf_mod.f90
 	goes_abi_mod.F90
+	himawari_ahi_mod.F90
 	read_write_indx_mod.F90
 	read_write_mpas_mod.F90
 	utils_mod.F90

@@ -5,7 +5,8 @@
 !
 module mod_himawari_ahi
 !
-! Purpose: Convert Himawari Standard Data (HSD) files to ioda-v1 format.
+! Purpose: Get Himawari Standard Data (HSD) lat, lon, bt, etc and pass it back to main
+!          Convert HSD files to ioda-v1 format.
 !          Currently only processes bands 7-16.
 !
 ! input files:
@@ -31,21 +32,20 @@ module mod_himawari_ahi
   implicit none
 
   integer(i_kind) :: mmday(12) = (/31,28,31,30,31,30,31,31,30,31,30,31/)
-  !character(len=ndatetime)  :: datetime   ! ccyy-mm-ddThh:mm:ssZ
-
   integer(i_kind), parameter :: npixel = 5500
   integer(i_kind), parameter :: nline  = 5500
   integer(i_kind), parameter :: nband = 10  ! number of infrared bands
-  integer(i_kind), parameter :: nsegm = 10  ! number of segment
+  integer(i_kind)            :: band_start = 7
+  integer(i_kind)            :: band_end   = 16
 
-  real(r_kind)    :: brit(npixel, nline)
-  real(r_double)  :: rlat, rlon, lon_diff, tmp1, theta1, theta2
-  integer(i_kind) :: ntotal, npix, nlin
-  real(r_kind), allocatable :: solzen(:,:)  ! satellite zenith angle (nx,ny)
-  real(r_kind), allocatable :: satzen(:,:)  ! solar zenith angle (nx,ny)
+  real(r_kind)               :: brit(npixel, nline)
+  real(r_double)             :: rlat, rlon, lon_diff, tmp1, theta1, theta2
+  integer(i_kind)            :: ntotal, npix, nlin
+  real(r_kind), allocatable  :: gsolzen(:,:)  ! satellite zenith angle (nx,ny)
+  real(r_kind), allocatable  :: gsatzen(:,:)  ! solar zenith angle (nx,ny)
   
-  integer(i_kind) :: nfile
-  integer(i_kind) :: ifile
+  integer(i_kind)    :: nfile
+  integer(i_kind)    :: ifile
   character(len=512) :: ffname
   logical            :: isfile
 
@@ -63,18 +63,14 @@ module mod_himawari_ahi
   character(len=3)   :: resolution
   character(len=22)  :: file_time
   integer(i_kind)    :: iband, jday
-  integer(i_kind)    :: year, month, day, hour, minute, sec
+
+  character(len=256) :: out_fname
 
   character(len=22), allocatable  :: scan_time(:) ! 2017-10-01T18:02:19.6Z
   integer(i_kind),   allocatable  :: fband_id(:)
   integer(i_kind),   allocatable  :: ftime_id(:)
   integer(i_kind),   allocatable  :: julianday(:)
   logical,           allocatable  :: valid(:)
-
-  character(len=256) :: out_fname
-
-  integer(i_kind) :: band_start = 7
-  integer(i_kind) :: band_end   = 16
 
    type rad_type
       real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
@@ -83,7 +79,7 @@ module mod_himawari_ahi
       real(r_kind),    allocatable :: sd(:)       ! std_dev(nband)
       integer(i_kind), allocatable :: cm(:,:)     ! cloud mask(nx,ny)
    end type rad_type
-   type(rad_type), allocatable  :: rdata(:)  ! (ntime)
+   type(rad_type),     allocatable :: rdata(:)    ! (ntime)
 
    integer(i_kind) :: it, ib, ii, i, j
    integer(i_kind) :: ntime
@@ -281,23 +277,21 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
 
    allocate (glat_out(npixel, nline))
    allocate (glon_out(npixel, nline))
-   allocate (solzen(npixel, nline))
-   allocate (satzen(npixel, nline))
+   allocate (gsolzen(npixel, nline))
+   allocate (gsatzen(npixel, nline))
    allocate (got_latlon_out(npixel, nline))
    allocate (F_out(npixel, nline, nfile))
    allocate (varname_out(nfile))
    glat_out(:,:) = missing_r
    glon_out(:,:) = missing_r
-   solzen(:,:)   = missing_r
-   satzen(:,:)   = missing_r
+   gsolzen(:,:)   = missing_r
+   gsatzen(:,:)   = missing_r
    F_out(:,:,:)  = missing_r
    varname_out   = ''
 
    ! parse the file list
    t_index = 0
    file_loop1: do ifile = 1, nfile
-     print*, 'ifile: ', ifile
-     print*, 'npixel, nline: ', npixel, nline
      ffname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
      inquire(file=trim(ffname), exist=isfile)
      if ( .not. isfile ) then
@@ -307,9 +301,8 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
         write(0,*) 'File found: '//trim(ffname)         
      end if
 
-     call decode_hsd_name(trim(hsd_fnames(ifile)), finfo, fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile), region, resolution, year, month, day, hour, minute)
-     
-     print*, trim(hsd_fnames(ifile)), ' ', scan_time(ifile), fband_id(ifile), region, resolution, julianday(ifile)
+     ! retrieve some basic info from the HSD filename itself
+     call decode_hsd_name(trim(hsd_fnames(ifile)), finfo, fband_id(ifile), fsat_id, scan_time(ifile), region, resolution, julianday(ifile))
 
      if ( fsat_id /= sat_id ) then
         cycle file_loop1
@@ -332,8 +325,6 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
         valid(ifile) = .true.
      end if
 
-     ! check files time: currently only aggregates bands for the same time slot of 10minutes
-     !!!
      ! group files of the same scan time
      if ( t_index == 0 ) then
         t_index = t_index + 1
@@ -371,7 +362,8 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
      if ( valid(ifile) ) then
      
        ffname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
-       call read_HSD(ffname, fband_id(ifile), fsat_id, julianday(ifile), glon_out, glat_out, brit, solzen, satzen, got_latlon_out, varname_out(ifile))
+       call read_HSD(ffname, fband_id(ifile), fsat_id, julianday(ifile), glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out, varname_out(ifile))
+       write(15,*) ifile, scan_time(ifile), julianday(ifile)
        F_out(:,:,ifile) = brit(:,:)
 
        it = ftime_id(ifile)
@@ -396,14 +388,14 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
          out_fname = trim(data_id)//'_'//fsat_id//'_'//scan_time(it)//'.nc4'
          write(0,*) 'Writing ', trim(out_fname)
          if ( allocated(rdata(it)%cm) ) then
-            call output_iodav1(trim(out_fname), scan_time(it),      &
-                               npixel, nline, nband, n_subsample,           &
-                               got_latlon_out, glat_out, glon_out, solzen, satzen, &
+            call output_iodav1(trim(out_fname), scan_time(it),                       &
+                               npixel, nline, nband, n_subsample,                    &
+                               got_latlon_out, glat_out, glon_out, gsolzen, gsatzen, &
                                rdata(it)%bt, rdata(it)%qf, rdata(it)%sd, rdata(it)%cm)
          else
-            call output_iodav1(trim(out_fname), scan_time(it),      &
-                               npixel, nline, nband, n_subsample,           &
-                               got_latlon_out, glat_out, glon_out, solzen, satzen, &
+            call output_iodav1(trim(out_fname), scan_time(it),                       &
+                               npixel, nline, nband, n_subsample,                    &
+                               got_latlon_out, glat_out, glon_out, gsolzen, gsatzen, &
                                rdata(it)%bt, rdata(it)%qf, rdata(it)%sd)
          end if
       end do
@@ -415,6 +407,8 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
       if ( allocated(rdata(it)%qf)  ) deallocate (rdata(it)%qf)
       if ( allocated(rdata(it)%cm)  ) deallocate (rdata(it)%cm)
    end do
+   if ( allocated(gsatzen) ) deallocate(gsatzen)
+   if ( allocated(gsolzen) ) deallocate(gsolzen)
    deallocate(rdata)
    deallocate(hsd_fnames)
    deallocate(ftime_id)
@@ -677,6 +671,9 @@ subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solze
 
   write(varname_out,"(A,I2.2)") 'BT_'//satid//'C', iband
 
+  ! additional info for writing ioda at MPAS mesh !BJJ
+  write(15,*) lon_sat, r_eq, h_sat
+
 end subroutine read_HSD
 
 subroutine pixlin_to_lonlat(pix, lin, lon, lat, ierr)
@@ -802,7 +799,68 @@ subroutine hisd_radiance_to_tbb (radiance, tbb)
  return
 end subroutine hisd_radiance_to_tbb
 
-subroutine decode_hsd_name(fname, finfo, iband, satid, file_time, gstime, region, resolution, year, month, day, hour, minute, epochtime) 
+subroutine calc_solar_zenith_angle_h(xlat, xlon, gmt, minute, julian, solzen)
+
+! the calulcation is adapted from subroutines radconst and calc_coszen in
+! WRF phys/module_radiation_driver.F
+
+ implicit none
+
+ real(r_single),  intent(in)    :: xlat, xlon
+ integer(i_kind), intent(in)    :: gmt, minute, julian
+ real(r_single),  intent(inout) :: solzen
+
+ real(r_single) :: obliq = 23.5
+ real(r_single) :: deg_per_day = 360.0/365.0
+ real(r_single) :: slon   ! longitude of the sun
+ real(r_single) :: declin ! declination of the sun
+ real(r_single) :: hrang, da, eot, xt, tloctm, rlat
+
+ ! initialize to missing values
+ solzen = missing_r
+
+ ! calculate longitude of the sun from vernal equinox
+ if ( julian >= 80 ) slon = (julian - 80 ) * deg_per_day
+ if ( julian <  80 ) slon = (julian + 285) * deg_per_day
+
+ declin = asin(sin(obliq*deg2rad)*sin(slon*deg2rad)) ! in radian
+
+ da = 6.2831853071795862*(julian-1)/365.
+ eot = (0.000075+0.001868*cos(da)-0.032077*sin(da) &
+        -0.014615*cos(2.0*da)-0.04089*sin(2.0*da))*(229.18)
+ xt = gmt + (minute + eot)/60.0
+
+ if ( abs(xlon) > 360.0 .or. abs(xlat) > 90.0 ) return
+ tloctm = xt + xlon/15.0
+ hrang = 15.0*(tloctm-12.0) * deg2rad
+ rlat = xlat * deg2rad
+ solzen = acos( sin(rlat)*sin(declin) + &
+                cos(rlat)*cos(declin)*cos(hrang) )
+ solzen = solzen * rad2deg
+
+ return
+end subroutine calc_solar_zenith_angle_h
+
+subroutine set_ahi_obserr(name_inst, nchan, obserrors)
+   implicit none
+
+   character(len=*), intent(in)  :: name_inst  ! instrument name
+   integer(i_kind),  intent(in)  :: nchan      ! channel number
+   real(r_kind),     intent(out) :: obserrors(nchan)
+   obserrors(:) = missing_r
+   if ( name_inst(1:3) == 'ahi' ) then
+      select case ( trim(name_inst) )
+         case ( 'ahi_himawari8' )
+            obserrors = (/ 2.2, 3.0, 2.5, 2.2, 2.2, 2.2, 2.2, 2.2, 2.2, 2.2 /)
+         case default
+            return
+      end select
+   else
+      return
+   end if
+end subroutine set_ahi_obserr
+
+subroutine decode_hsd_name(fname, finfo, iband, satid, file_time, region, resolution, jday)
 
    implicit none
 
@@ -813,13 +871,11 @@ subroutine decode_hsd_name(fname, finfo, iband, satid, file_time, gstime, region
    integer(i_kind),   intent(out) :: iband      ! 7-16
    character(len=4),  intent(out) :: region     ! 'FLDK'
    character(len=3),  intent(out) :: resolution ! 'R20, R05, etc'
-   integer(i_kind),   intent(out) :: year, month, day, hour, minute
-   integer(i_kind),   intent(out) :: gstime
-   integer(i_llong),  intent(out), optional :: epochtime
+   integer(i_kind),   intent(out) :: jday
 
    character(len=4)  :: syear
    character(len=2)  :: smonth, sday, shour, sminute
-   integer(i_kind)   :: sec
+   integer(i_kind)   :: year, month, day, hour, minute
 
    !HS_H08_20180415_0050_B03_FLDK_R05_S0101.DAT
    read(fname(1:2),   '(a2)')   finfo
@@ -838,11 +894,14 @@ subroutine decode_hsd_name(fname, finfo, iband, satid, file_time, gstime, region
    read(fname(26:29), '(a4)')   region
    read(fname(31:33), '(a3)')   resolution
    ! 2017-10-01T18:02:0.00Z
-   print*, syear, smonth, sday, shour, sminute
+   !print*, syear, smonth, sday, shour, sminute
    file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
 
-   sec = 0
-   call get_julian_time(year, month, day, hour, minute, sec, gstime, epochtime)
+   jday = 0
+   do i = 1, month - 1
+      jday = jday + mmday(i)
+   end do
+   jday = jday + day
 
 end subroutine decode_hsd_name
 

@@ -390,12 +390,12 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
          if ( allocated(rdata(it)%cm) ) then
             call output_iodav1(trim(out_fname), scan_time(it),                       &
                                npixel, nline, nband, n_subsample,                    &
-                               got_latlon_out, glat_out, glon_out, gsolzen, gsatzen, &
+                               got_latlon_out, glat_out, glon_out, gsatzen, gsolzen, &
                                rdata(it)%bt, rdata(it)%qf, rdata(it)%sd, rdata(it)%cm)
          else
             call output_iodav1(trim(out_fname), scan_time(it),                       &
                                npixel, nline, nband, n_subsample,                    &
-                               got_latlon_out, glat_out, glon_out, gsolzen, gsatzen, &
+                               got_latlon_out, glat_out, glon_out, gsatzen, gsolzen, &
                                rdata(it)%bt, rdata(it)%qf, rdata(it)%sd)
          end if
       end do

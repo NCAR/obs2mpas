@@ -1,1 +1,0 @@
-/glade/work/ivette/pandac/obs2model/15Nov2024/nbuilb/bin/obs2mpas.x

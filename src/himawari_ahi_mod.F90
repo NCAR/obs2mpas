@@ -31,6 +31,19 @@ module mod_himawari_ahi
    
   implicit none
 
+  ! prefix for Cloud Property from ftp.ptree.jaxa.jp
+  character(len=15), parameter :: CLP_id     = 'L2CLP'
+
+  ! prefix for Cloud Mask (Binary Cloud Mask) from AWS NOAA
+  ! prefix for Himawari-8 data on AWS (https://noaa-himawari8.s3.amazonaws.com/index.html)
+  character(len=14), parameter :: BCM08_id   = 'CLOUD_MASK'
+  character(len=15), parameter :: HT08_id    = 'CLOUD_HEIGHT'
+  character(len=15), parameter :: Phase08_id = 'CLOUD_PHASE'
+  ! prefix for Himawari-9 data on AWS (https://noaa-himawari9.s3.amazonaws.com/index.html)
+  character(len=14), parameter :: BCM09_id   = 'CMSK'
+  character(len=15), parameter :: HT09_id    = 'CHGT'
+  character(len=15), parameter :: Phase09_id = 'CPHS'
+
   integer(i_kind) :: mmday(12) = (/31,28,31,30,31,30,31,31,30,31,30,31/)
   integer(i_kind), parameter :: npixel = 5500
   integer(i_kind), parameter :: nline  = 5500
@@ -49,14 +62,14 @@ module mod_himawari_ahi
   character(len=512) :: ffname
   logical            :: isfile
 
-  character(len=256) :: hsd_list_file  ! the text file that contains a list of netcdf files to process
+  character(len=256) :: hs_list_file  ! the text file that contains a list of files to process
   character(len=256) :: data_dir
   character(len=18)  :: data_id
   character(len=3)   :: sat_id
   integer(i_kind)    :: n_subsample
   logical            :: write_iodav1
 
-  character(len=256), allocatable :: hsd_fnames(:)
+  character(len=256), allocatable :: hs_fnames(:)
   character(len=2)   :: finfo
   character(len=3)   :: fsat_id
   character(len=4)   :: region
@@ -70,24 +83,30 @@ module mod_himawari_ahi
   integer(i_kind),   allocatable  :: fband_id(:)
   integer(i_kind),   allocatable  :: ftime_id(:)
   integer(i_kind),   allocatable  :: julianday(:)
-  logical,           allocatable  :: valid(:)
+  logical,           allocatable  :: valid(:), is_CLP(:), is_BCM(:), is_HT(:), is_Phase(:)
 
-   type rad_type
-      real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
-      real(r_kind),    allocatable :: bt(:,:,:)   ! brightness temperature(nband,nx,ny)
-      integer(i_kind), allocatable :: qf(:,:,:)   ! quality flag(nband,nx,ny)
-      real(r_kind),    allocatable :: sd(:)       ! std_dev(nband)
-      integer(i_kind), allocatable :: cm(:,:)     ! cloud mask(nx,ny)
-   end type rad_type
-   type(rad_type),     allocatable :: rdata(:)    ! (ntime)
+  character(len=22), allocatable  :: time_start(:) ! (ntime) 2017-10-01T18:02:19.6Z
 
-   integer(i_kind) :: it, ib, ii, i, j
-   integer(i_kind) :: ntime
-   integer(i_kind) :: t_index
-   integer(i_kind) :: band_id
+  integer(i_kind) :: ncid, nf_status
+  integer(i_kind) :: nx, ny
+  integer(i_kind) :: it, ib, ii, i, j
+  integer(i_kind) :: ntime
+  integer(i_kind) :: t_index
+  integer(i_kind) :: band_id
 
-   real(r_kind)                    :: sdtb ! to be done
-   logical                         :: found_time
+  real(r_kind)                    :: sdtb ! to be done
+  logical                         :: found_time
+
+  integer(i_kind), allocatable    :: cm_2d(:,:)   ! cloud_mask(nx,ny)
+
+  type rad_type
+     real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
+     real(r_kind),    allocatable :: bt(:,:,:)   ! brightness temperature(nband,nx,ny)
+     integer(i_kind), allocatable :: qf(:,:,:)   ! quality flag(nband,nx,ny)
+     real(r_kind),    allocatable :: sd(:)       ! std_dev(nband)
+     integer(i_kind), allocatable :: cm(:,:)     ! cloud mask(nx,ny)
+  end type rad_type
+  type(rad_type),     allocatable :: rdata(:)    ! (ntime)
 
   type basic_info
     integer(i_byte)    :: headerNum      ! header block number = 1
@@ -266,7 +285,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    logical,           allocatable, intent(out) :: got_latlon_out(:,:)  ! (nx,ny)
 
    ! get namelist variables
-   call get_namelist_vars(nfile, hsd_fnames, hsd_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1)
+   call get_namelist_vars(nfile, hs_fnames, hs_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1)
 
    allocate (ftime_id(nfile))
    allocate (scan_time(nfile))
@@ -275,6 +294,15 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    allocate (valid(nfile))
    valid(:) = .false.
 
+   allocate (is_CLP(nfile))
+   allocate (is_BCM(nfile))
+   allocate (is_Phase(nfile))
+   allocate (is_HT(nfile))
+   is_CLP(:)   = .false.
+   is_BCM(:)   = .false.
+   is_Phase(:) = .false.
+   is_HT(:)    = .false.
+
    allocate (glat_out(npixel, nline))
    allocate (glon_out(npixel, nline))
    allocate (gsolzen(npixel, nline))
@@ -282,48 +310,47 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    allocate (got_latlon_out(npixel, nline))
    allocate (F_out(npixel, nline, nfile))
    allocate (varname_out(nfile))
-   glat_out(:,:) = missing_r
-   glon_out(:,:) = missing_r
+   glat_out(:,:)  = missing_r
+   glon_out(:,:)  = missing_r
    gsolzen(:,:)   = missing_r
    gsatzen(:,:)   = missing_r
-   F_out(:,:,:)  = missing_r
-   varname_out   = ''
+   F_out(:,:,:)   = missing_r
+   varname_out(:) = ''
 
    ! parse the file list
    t_index = 0
    file_loop1: do ifile = 1, nfile
-     ffname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
+     ffname = trim(data_dir)//'/'//trim(hs_fnames(ifile))
      inquire(file=trim(ffname), exist=isfile)
      if ( .not. isfile ) then
         write(0,*) 'File not found: '//trim(ffname)
-        cycle file_loop1
      else
         write(0,*) 'File found: '//trim(ffname)         
      end if
 
-     ! retrieve some basic info from the HSD filename itself
-     call decode_hsd_name(trim(hsd_fnames(ifile)), finfo, fband_id(ifile), fsat_id, scan_time(ifile), region, resolution, julianday(ifile))
+     ! retrieve some basic info from the filename itself
+     call decode_himawari_name(trim(hs_fnames(ifile)), finfo, fband_id(ifile), fsat_id, scan_time(ifile), region, resolution, julianday(ifile), is_CLP(ifile), is_BCM(ifile), is_Phase(ifile), is_HT(ifile))
 
      if ( fsat_id /= sat_id ) then
         cycle file_loop1
      end if
 
-     ! id of the file name must match specified data_id
-     if ( finfo /= data_id ) then
-        write(0,*) 'Satellite ID from namelist /= Satellite ID in flist.txt'
-        cycle file_loop1
-     else
-        ! only process band 7-16
-        if ( fband_id(ifile) < band_start .or. fband_id(ifile) > band_end ) then
-           write(0,*) 'Infrared band NOT supported'
+     if ( .not. ( is_CLP(ifile) .or. is_BCM(ifile) .or. is_Phase(ifile) &
+                .or. is_HT(ifile) ) ) then
+        ! id of the file name must match specified data_id in namelist
+        if ( finfo /= data_id ) then
+           write(0,*) 'Satellite ID from namelist /= Satellite ID in flist.txt'
            cycle file_loop1
+        else
+           ! only process band 7-16
+           if ( fband_id(ifile) < band_start .or. fband_id(ifile) > band_end ) then
+              write(0,*) 'Infrared band ', fband_id(ifile), ' NOT supported'
+              cycle file_loop1
+           end if
         end if
-        if (region .ne. 'FLDK' .or. resolution .ne. 'R20') then
-           write(0,*) 'Region, resolution and infrared band supported'
-           cycle file_loop1
-        end if
-        valid(ifile) = .true.
      end if
+
+     valid(ifile) = .true.
 
      ! group files of the same scan time
      if ( t_index == 0 ) then
@@ -351,36 +378,77 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
 
    if ( ntime <= 0 ) then
       write(0,*) 'ntime = ', ntime
-      write(0,*) 'No valid files found from hsd_list_file '//trim(hsd_list_file)
+      write(0,*) 'No valid files found from hs_list_file '//trim(hs_list_file)
       stop
    end if
 
+   allocate (time_start(ntime))
    allocate (rdata(ntime))
 
    file_loop2: do ifile = 1, nfile
 
      if ( valid(ifile) ) then
      
-       ffname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
-       call read_HSD(ffname, fband_id(ifile), fsat_id, julianday(ifile), glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out, varname_out(ifile))
-       write(15,*) ifile, scan_time(ifile), julianday(ifile)
-       F_out(:,:,ifile) = brit(:,:)
+       ffname = trim(data_dir)//'/'//trim(hs_fnames(ifile))
 
-       it = ftime_id(ifile)
-       ib = fband_id(ifile)
+       if ( .not. ( is_CLP(ifile) .or. is_BCM(ifile) .or. is_Phase(ifile) &
+                  .or. is_HT(ifile) ) ) then
+         call read_HSD(ffname, fband_id(ifile), fsat_id, julianday(ifile), glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
+         write(15,*) ifile, scan_time(ifile), julianday(ifile)
+         F_out(:,:,ifile) = brit(:,:)
 
-       if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband, npixel, nline))
-       if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband, npixel, nline))
-       if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband, npixel, nline))
-       if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
+         it = ftime_id(ifile)
+         ib = fband_id(ifile)
 
-       rdata(it)%bt(ib-band_start+1,:,:)  = brit(:,:)
-       rdata(it)%rad(ib-band_start+1,:,:) = missing_r !rad_2d(i,j)
-       rdata(it)%qf(ib-band_start+1,:,:)  = missing_r !qf_2d(i,j)
-       rdata(it)%sd(ib-band_start+1)      = missing_r !sdtb
+         if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband, npixel, nline))
+         if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband, npixel, nline))
+         if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband, npixel, nline))
+         if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
+
+         rdata(it)%bt(ib-band_start+1,:,:)  = brit(:,:)
+         rdata(it)%rad(ib-band_start+1,:,:) = missing_r !rad_2d(i,j)
+         rdata(it)%qf(ib-band_start+1,:,:)  = missing_r !qf_2d(i,j)
+         rdata(it)%sd(ib-band_start+1)      = missing_r !sdtb
+
+         write(varname_out(ifile),"(A,I2.2)") 'BT_'//fsat_id//'C', ib
+
+       else if ( is_CLP(ifile) ) then
+         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+         if ( nf_status == 0 ) then
+            write(0,*) 'Reading '//trim(ffname)
+         else
+            write(0,*) 'ERROR reading '//trim(ffname)
+            cycle file_loop2
+         end if
+         if ( fsat_id == 'H08' ) then
+           call read_GRB_dims(ncid, nx, ny)
+           allocate (cm_2d(nx, ny))
+           call read_CLP(ncid, nx, ny, cm_2d)
+           if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+           rdata(it)%cm(:,:) = cm_2d(:,:)
+
+           !BJJ copy to output array: use ifile index
+           F_out(:,:,ifile) = cm_2d(:,:)
+
+         end if
+
+         varname_out(ifile) = 'BCM_'//fsat_id
+
+       else if ( is_BCM(ifile) .or. is_HT(ifile) .or. is_Phase(ifile) ) then
+         write(0,*) 'ERROR: reading file NOT implemented yet'
+
+       else
+         write(0,*) 'ERROR: something is wrong. Check the files'
+         stop
+       end if
+
+       nf_status = nf_CLOSE(ncid)
 
      end if
+
    end do file_loop2
+
+   if ( allocated(cm_2d) )  deallocate(cm_2d)
 
    ! write IODAv1 file
    if ( write_iodav1 ) then
@@ -410,16 +478,78 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    if ( allocated(gsatzen) ) deallocate(gsatzen)
    if ( allocated(gsolzen) ) deallocate(gsolzen)
    deallocate(rdata)
-   deallocate(hsd_fnames)
+   deallocate(hs_fnames)
    deallocate(ftime_id)
    deallocate(scan_time)
    deallocate(fband_id)
    deallocate(julianday)
    deallocate(valid)
 
+   deallocate(is_CLP)
+   deallocate(is_BCM)
+   deallocate(is_Phase)
+   deallocate(is_HT)
+
 end subroutine Himawari_ReBroadcast_converter
 
-subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solzen, satzen, valid, varname_out)
+subroutine read_GRB_dims(ncid, nx, ny)
+   implicit none
+   integer(i_kind), intent(in)  :: ncid
+   integer(i_kind), intent(out) :: nx, ny
+   integer(i_kind)              :: dimid
+   integer(i_kind)              :: nf_status(4)
+   continue
+   nf_status(1) = nf_INQ_DIMID(ncid, 'latitude', dimid)
+   nf_status(2) = nf_INQ_DIMLEN(ncid, dimid, nx)
+   nf_status(3) = nf_INQ_DIMID(ncid, 'longitude', dimid)
+   nf_status(4) = nf_INQ_DIMLEN(ncid, dimid, ny)
+   if ( any(nf_status /= 0) ) then
+      write(0,*) 'Error reading dimensions'
+      stop
+   end if
+   return
+end subroutine read_GRB_dims
+
+subroutine read_CLP(ncid, nx, ny, cm)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   integer(i_kind),   intent(inout) :: cm(nx,ny)
+   integer(i_short),  allocatable   :: itmp_short_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_kind)                  :: imiss = -999
+   integer(i_short)                 :: ifill
+
+   continue
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_short_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CLTYPE', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
+   cm(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         if ( (itmp_short_2d(i,j) /= ifill) .or. (itmp_short_2d(i,j) /= 10) ) then
+            if (itmp_short_2d(i,j) == 0 ) then ! clear pixel
+               cm(i,j) = 0
+            else
+               cm(i,j) = 1
+            end if
+         end if
+      end do
+   end do
+   deallocate(itmp_short_2d)
+
+   return
+end subroutine read_CLP
+
+subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solzen, satzen, valid)
 
   implicit none
 
@@ -433,7 +563,6 @@ subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solze
   real(r_single),   intent(out)  :: solzen(npixel, nline)
   real(r_single),   intent(out)  :: satzen(npixel, nline)
   logical,          intent(out)  :: valid(npixel, nline)
-  character(len=64), intent(out) :: varname_out
    
   integer(i_short), allocatable  :: idata(:)
   integer(i_kind) :: numCorrect
@@ -669,8 +798,6 @@ subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solze
   end if
   close(iunit)
 
-  write(varname_out,"(A,I2.2)") 'BT_'//satid//'C', iband
-
   ! additional info for writing ioda at MPAS mesh !BJJ
   write(15,*) lon_sat, r_eq, h_sat
 
@@ -860,7 +987,7 @@ subroutine set_ahi_obserr(name_inst, nchan, obserrors)
    end if
 end subroutine set_ahi_obserr
 
-subroutine decode_hsd_name(fname, finfo, iband, satid, file_time, region, resolution, jday)
+subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, resolution, jday, is_CLP, is_BCM, is_Phase, is_HT)
 
    implicit none
 
@@ -872,37 +999,166 @@ subroutine decode_hsd_name(fname, finfo, iband, satid, file_time, region, resolu
    character(len=4),  intent(out) :: region     ! 'FLDK'
    character(len=3),  intent(out) :: resolution ! 'R20, R05, etc'
    integer(i_kind),   intent(out) :: jday
+   logical,           intent(out) :: is_CLP
+   logical,           intent(out) :: is_BCM
+   logical,           intent(out) :: is_HT
+   logical,           intent(out) :: is_Phase
 
    character(len=4)  :: syear
-   character(len=2)  :: smonth, sday, shour, sminute
-   integer(i_kind)   :: year, month, day, hour, minute
+   character(len=2)  :: smonth, sday, shour, sminute, ssec1
+   character(len=1)  :: ssec2
+   character(len=3)  :: version
+   character(len=5)  :: pixelnumber, linenumber
+   integer(i_kind)   :: year, month, day, hour, minute, sec, sec1, sec2
 
-   !HS_H08_20180415_0050_B03_FLDK_R05_S0101.DAT
-   read(fname(1:2),   '(a2)')   finfo
-   read(fname(4:6),   '(a3)')   satid
-   read(fname(8:11),  '(i4)')   year
-   read(fname(8:11),  '(a4)')   syear
-   read(fname(12:13), '(i2)')   month
-   read(fname(12:13), '(a2)')   smonth
-   read(fname(14:15), '(i2)')   day
-   read(fname(14:15), '(a2)')   sday
-   read(fname(17:18), '(i2)')   hour
-   read(fname(17:18), '(a2)')   shour
-   read(fname(19:20), '(i2)')   minute
-   read(fname(19:20), '(a2)')   sminute
-   read(fname(23:24), '(i2)')   iband
-   read(fname(26:29), '(a4)')   region
-   read(fname(31:33), '(a3)')   resolution
-   ! 2017-10-01T18:02:0.00Z
-   !print*, syear, smonth, sday, shour, sminute
-   file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
+   !CLP_id: NC_H08_20180512_1800_L2CLP010_FLDK.02401_02401.nc
+   !BCM08_id: Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
+   !BCM09_id: AHI-CMSK_v1r1_h09_s202308161430206_e202308161439400_c202308161452133.nc
 
-   jday = 0
-   do i = 1, month - 1
-      jday = jday + mmday(i)
-   end do
-   jday = jday + day
+   if ( fname( 22:26) == CLP_id ) then
+      is_CLP = .true.
+      iband  = -99
+   else if ( fname( 35:44) == BCM08_id ) then
+      is_BCM = .true.
+      satid = 'H08'
+      iband = -99
+   else if ( fname( 35:46) == HT08_id ) then
+      is_HT = .true.
+      satid = 'H08'
+      iband = -99
+   else if ( fname( 35:46) == Phase08_id ) then
+      is_Phase = .true.
+      satid = 'H08'
+      iband = -99
+   else if ( fname( 5:8) == BCM09_id ) then
+      is_BCM = .true.
+      satid = 'H09'
+      iband = -99
+   else if ( fname( 5:8) == HT09_id ) then
+      is_HT = .true.
+      satid = 'H09'
+      iband = -99
+   else if ( fname( 5:8) == Phase09_id ) then
+      is_Phase = .true.
+      satid = 'H09'
+      iband = -99
+   else
+      is_CLP   = .false.
+      is_Phase = .false.
+      is_HT    = .false.
+      is_BCM   = .false.
+   end if
 
-end subroutine decode_hsd_name
+   if ( .not. ( is_CLP .or. is_BCM .or. is_Phase .or. is_HT ) ) then
+      !HS_H08_20180415_0050_B03_FLDK_R05_S0101.DAT
+      read(fname(1:2),   '(a2)')   finfo
+      read(fname(4:6),   '(a3)')   satid
+      read(fname(8:11),  '(i4)')   year
+      read(fname(8:11),  '(a4)')   syear
+      read(fname(12:13), '(i2)')   month
+      read(fname(12:13), '(a2)')   smonth
+      read(fname(14:15), '(i2)')   day
+      read(fname(14:15), '(a2)')   sday
+      read(fname(17:18), '(i2)')   hour
+      read(fname(17:18), '(a2)')   shour
+      read(fname(19:20), '(i2)')   minute
+      read(fname(19:20), '(a2)')   sminute
+      read(fname(23:24), '(i2)')   iband
+      read(fname(26:29), '(a4)')   region
+      read(fname(31:33), '(a3)')   resolution
+      ! 2017-10-01T18:02:0.00Z
+      !print*, syear, smonth, sday, shour, sminute
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
+
+      jday = 0
+      do i = 1, month - 1
+        jday = jday + mmday(i)
+      end do
+      jday = jday + day
+
+   else if ( is_CLP ) then
+      !NC_H08_20180512_1800_L2CLP010_FLDK.02401_02401.nc
+      finfo = 'HS'
+      resolution = 'R50'
+      read(fname(4:6),   '(a3)')   satid
+      read(fname(8:11),  '(i4)')   year
+      read(fname(8:11),  '(a4)')   syear
+      read(fname(12:13), '(i2)')   month
+      read(fname(12:13), '(a2)')   smonth
+      read(fname(14:15), '(i2)')   day
+      read(fname(14:15), '(a2)')   sday
+      read(fname(17:18), '(i2)')   hour
+      read(fname(17:18), '(a2)')   shour
+      read(fname(19:20), '(i2)')   minute
+      read(fname(19:20), '(a2)')   sminute
+      read(fname(27:29), '(a3)')   version
+      read(fname(31:34), '(a4)')   region
+      read(fname(36:40), '(a5)')   pixelnumber
+      read(fname(41:45), '(a5)')   linenumber
+      ! 2017-10-01T18:02:0.00Z
+      !print*, syear, smonth, sday, shour, sminute
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
+
+      jday = 0
+      do i = 1, month - 1
+        jday = jday + mmday(i)
+      end do
+      jday = jday + day
+
+   else if ( (is_BCM .or. is_Phase .or. is_HT) .and. (satid == 'H08') ) then
+      !Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
+      finfo = 'HS'
+      resolution = 'R50'
+      region = 'FLDK'
+      read(fname(20:23), '(i4)')   year
+      read(fname(20:23), '(a4)')   syear
+      read(fname(24:26), '(i3)')   jday
+      read(fname(28:29), '(i2)')   hour
+      read(fname(28:29), '(a2)')   shour
+      read(fname(30:31), '(i2)')   minute
+      read(fname(30:31), '(a2)')   sminute
+      read(fname(33:34), '(i2)')   sec
+      ! get month and day from julian day
+      call get_date(year, jday, month, day)
+      write(smonth, '(i2)') month
+      write(sday, '(i2)') day
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
+
+   else if ( (is_BCM .or. is_Phase .or. is_HT) .and. (satid == 'H09') ) then
+      !AHI-CMSK_v1r1_h09_s202308161430206_e202308161439400_c202308161452133.nc
+      finfo = 'HS'
+      read(fname(20:23), '(i4)')   year
+      read(fname(20:23), '(a4)')   syear
+      read(fname(24:25), '(i2)')   month
+      read(fname(24:25), '(a2)')   smonth
+      read(fname(26:27), '(i2)')   day
+      read(fname(26:27), '(a2)')   sday
+      read(fname(28:29), '(i2)')   hour
+      read(fname(28:29), '(a2)')   shour
+      read(fname(30:31), '(i2)')   minute
+      read(fname(30:31), '(a2)')   sminute
+      read(fname(32:33), '(i2)')   sec1   ! integer part of second
+      read(fname(32:33), '(a2)')   ssec1
+      read(fname(34:34), '(a1)')   sec2   ! decimal part of second
+      read(fname(34:34), '(a1)')   ssec2
+      resolution = 'R10'
+      region = 'FLDK'
+      ! 2017-10-01T18:02:0.00Z
+      !print*, syear, smonth, sday, shour, sminute
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':'//ssec1//'.'//ssec2//'0Z'
+
+      jday = 0
+      do i = 1, month - 1
+        jday = jday + mmday(i)
+      end do
+      jday = jday + day
+
+   else
+      write(0,*) 'Error decode_himawari_name'
+      stop
+   end if
+
+   return
+end subroutine decode_himawari_name
 
 end module mod_himawari_ahi

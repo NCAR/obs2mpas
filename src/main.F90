@@ -68,10 +68,11 @@ program  main
    logical, allocatable :: l_got_latlon(:)
    real(sp), allocatable :: solzen(:)
 
-   integer             :: narg, iarg
+   integer             :: narg, iarg, pos
    character(len=512)  :: strtmp
    logical             :: do_abi, do_ahi
    character(len=3)    :: sensor
+   character(len=256)  :: namelist_fname
 
    !BJJ namelist for nml_main
    character(len=256)  :: f_mpas_latlon
@@ -88,40 +89,48 @@ program  main
    write (6, 777) 'Date-time: ',tval(1),'-',tval(2),'-',tval(3),tval(5),':',tval(6),':',tval(7)
 
    !----- 0. get argument from command line
-   do_abi = .false.
+   do_abi = .true.
    do_ahi = .false.
+   sensor = 'ABI'
+   namelist_fname = 'namelist.obs2model'
    narg = command_argument_count()
    if ( narg > 0 ) then
       do iarg = 1, narg
          call get_command_argument(number=iarg, value=strtmp)
-         if ( trim(strtmp) == '-abi' ) then
-            do_abi = .true.
-            sensor = 'ABI'
-         else if ( trim(strtmp) == '-ahi' ) then
-            do_ahi = .true.
-            sensor = 'AHI'
+         pos = index(trim(adjustl(strtmp)), 'namelist')
+         if (pos > 0) then
+            namelist_fname = strtmp
          else
-            write(*,*) 'Error: observation type not supported'
-            stop
+            if ( trim(strtmp) == '-abi' ) then
+               do_abi = .true.
+               sensor = 'ABI'
+            else if ( trim(strtmp) == '-ahi' ) then
+               do_abi = .false.
+               do_ahi = .true.
+               sensor = 'AHI'
+            else
+               write(*,*) 'Error: observation type not supported'
+               stop 1  ! Exit the program with an error code
+            end if
          end if
       end do
    else
-      write(*,*) 'Using default observation type: ABI'
-      do_abi = .true.
-      sensor = 'ABI'
+      write(*,*) 'Using default values:'
+      write(*,*) '- observation type: ABI'
+      write(*,*) '- namelist: namelist.obs2model'
    end if
 
    !----- 1. read namelist ------------------------------------------------------
    ! initialize namelist variables
    f_mpas_latlon = './x1.655362.init.nc' ! MPAS file path/name to read lat & lon information
-   f_mpas_out    = './x1.655362.init.nc' ! MPAS file for writing the interpolated obs fields
+   f_mpas_out    = './newfile.nc'        ! MPAS file for writing the interpolated obs fields
    l_read_indx   = .false.  ! read index and count for matching obs-MPAS pairs
    l_write_indx  = .false.  ! write index and count for matching obs-MPAS pairs
    l_superob     = .false.  ! .true.= mesh-based superob, .false.= nearest-neighbor
    l_write_o2m_iodav1 = .false. ! .true.= write superob/neqrest-neighbor into ioda v1 file
 
    ! read namelist
-   open(unit=nml_unit, file='namelist.obs2model', status='old', form='formatted')
+   open(unit=nml_unit, file=namelist_fname, status='old', form='formatted')
    read(unit=nml_unit, nml=main_nml, iostat=istat)
    write(0,nml=main_nml)
    if ( istat /= 0 ) then

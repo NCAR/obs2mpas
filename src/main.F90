@@ -72,7 +72,6 @@ program  main
    character(len=512)  :: strtmp
    logical             :: do_abi, do_ahi
    character(len=3)    :: sensor
-   character(len=256)  :: namelist_fname
 
    !BJJ namelist for nml_main
    character(len=256)  :: f_mpas_latlon
@@ -92,15 +91,12 @@ program  main
    do_abi = .true.
    do_ahi = .false.
    sensor = 'ABI'
-   namelist_fname = 'namelist.obs2model'
    narg = command_argument_count()
    if ( narg > 0 ) then
       do iarg = 1, narg
          call get_command_argument(number=iarg, value=strtmp)
          pos = index(trim(adjustl(strtmp)), 'namelist')
-         if (pos > 0) then
-            namelist_fname = strtmp
-         else
+         if (pos == 0) then
             if ( trim(strtmp) == '-abi' ) then
                do_abi = .true.
                sensor = 'ABI'
@@ -115,9 +111,7 @@ program  main
          end if
       end do
    else
-      write(*,*) 'Using default values:'
-      write(*,*) '- observation type: ABI'
-      write(*,*) '- namelist: namelist.obs2model'
+      write(*,*) 'Using default value observation type: ABI'
    end if
 
    !----- 1. read namelist ------------------------------------------------------
@@ -130,7 +124,7 @@ program  main
    l_write_o2m_iodav1 = .false. ! .true.= write superob/neqrest-neighbor into ioda v1 file
 
    ! read namelist
-   open(unit=nml_unit, file=namelist_fname, status='old', form='formatted')
+   open(unit=nml_unit, file='namelist.obs2model', status='old', form='formatted')
    read(unit=nml_unit, nml=main_nml, iostat=istat)
    write(0,nml=main_nml)
    if ( istat /= 0 ) then

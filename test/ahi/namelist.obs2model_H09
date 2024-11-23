@@ -1,0 +1,17 @@
+&data_nml
+  list_files = './flist.txt',
+  data_dir = '/glade/campaign/mmm/parc/ivette/pandac/Observations/ahi/test_data_obs2model/H09',   ! path of the HSD files
+  data_id = 'HS', ! prefix of the downloaded HSD files
+  sat_id = 'H09',
+  n_subsample = 1,
+  write_iodav1 = .false.,
+/
+
+&main_nml
+  f_mpas_latlon = '/glade/campaign/mmm/parc/liuz/pandac_common/30km/30km_GFSANA/x1.655362.init.2018-04-15_00.00.00.nc', ! MPAS file path/name to read lat & lon information
+  f_mpas_out    = './newfile.nc', ! MPAS file for writing the interpolated obs fields
+  l_read_indx   = .false.,  ! read index and count for matching obs-MPAS pairs
+  l_write_indx  = .true.,   ! write index and count for matching obs-MPAS pairs
+  l_superob     = .true.,   ! .true.= mesh-based superob, .false.= nearest-neighbor
+  l_write_o2m_iodav1 = .true., ! .true.= write superob/neqrest-neighbor into ioda v1 file
+/

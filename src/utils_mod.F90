@@ -127,6 +127,26 @@ subroutine get_date(ccyy, jday, month, day)
    return
 end subroutine get_date
 
+subroutine read_GRB_dims(ncid, xlat, ylon, nx, ny)
+   implicit none
+   integer(i_kind),   intent(in) :: ncid
+   character(len=10), intent(in) :: xlat
+   character(len=10), intent(in) :: ylon
+   integer(i_kind),   intent(out):: nx, ny
+   integer(i_kind)               :: dimid
+   integer(i_kind)               :: nf_status(4)
+   continue
+   nf_status(1) = nf_INQ_DIMID(ncid, xlat, dimid)
+   nf_status(2) = nf_INQ_DIMLEN(ncid, dimid, nx)
+   nf_status(3) = nf_INQ_DIMID(ncid, ylon, dimid)
+   nf_status(4) = nf_INQ_DIMLEN(ncid, dimid, ny)
+   if ( any(nf_status /= 0) ) then
+      write(0,*) 'Error reading dimensions'
+      stop
+   end if
+   return
+end subroutine read_GRB_dims
+
 subroutine output_iodav1( fname, time_start, nx, ny, nband, n_subsample, got_latlon, lat, lon, sat_zen, sun_zen, bt, qf, sdtb, cloudmask )
 
    implicit none

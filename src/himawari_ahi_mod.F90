@@ -78,6 +78,8 @@ module mod_himawari_ahi
   integer(i_kind)    :: iband, jday
 
   character(len=256) :: out_fname
+  character(len=10)  :: xlat
+  character(len=10)  :: ylon
 
   character(len=22), allocatable  :: scan_time(:) ! 2017-10-01T18:02:19.6Z
   integer(i_kind),   allocatable  :: fband_id(:)
@@ -420,23 +422,45 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
             write(0,*) 'ERROR reading '//trim(ffname)
             cycle file_loop2
          end if
-         if ( fsat_id == 'H08' ) then
-           call read_GRB_dims(ncid, nx, ny)
-           allocate (cm_2d(nx, ny))
-           call read_CLP(ncid, nx, ny, cm_2d)
-           if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
-           rdata(it)%cm(:,:) = cm_2d(:,:)
+         xlat = 'latitude'
+         ylon = 'longitude'
+         call read_GRB_dims(ncid, xlat, ylon, nx, ny)
+         allocate (cm_2d(nx, ny))
+         call read_CLP(ncid, nx, ny, cm_2d)
+         if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+         rdata(it)%cm(:,:) = cm_2d(:,:)
 
-           !BJJ copy to output array: use ifile index
-           F_out(:,:,ifile) = cm_2d(:,:)
-
-         end if
+         !BJJ copy to output array: use ifile index
+         F_out(:,:,ifile) = cm_2d(:,:)
 
          varname_out(ifile) = 'BCM_'//fsat_id
 
-       else if ( is_BCM(ifile) .or. is_HT(ifile) .or. is_Phase(ifile) ) then
-         write(0,*) 'ERROR: reading file NOT implemented yet'
+       else if ( is_BCM(ifile) ) then
+         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+         if ( nf_status == 0 ) then
+            write(0,*) 'Reading '//trim(ffname)
+         else
+            write(0,*) 'ERROR reading '//trim(ffname)
+            cycle file_loop2
+         end if
+         xlat = 'x'
+         ylon = 'y'
+         call read_GRB_dims(ncid, xlat, ylon, nx, ny)
+         allocate (cm_2d(nx, ny))
+         call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
+         if ( time_start(it) /= scan_time(ifile) ) then
+            write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
+            cycle file_loop2
+         end if
+         if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+         rdata(it)%cm(:,:) = cm_2d(:,:)
 
+         !BJJ copy to output array: use ifile index
+         F_out(:,:,ifile) = cm_2d(:,:)
+
+         varname_out(ifile) = 'BCM_'//fsat_id
+
+       else if ( is_HT(ifile) .or. is_Phase(ifile) ) then
        else
          write(0,*) 'ERROR: something is wrong. Check the files'
          stop
@@ -492,24 +516,6 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
 
 end subroutine Himawari_ReBroadcast_converter
 
-subroutine read_GRB_dims(ncid, nx, ny)
-   implicit none
-   integer(i_kind), intent(in)  :: ncid
-   integer(i_kind), intent(out) :: nx, ny
-   integer(i_kind)              :: dimid
-   integer(i_kind)              :: nf_status(4)
-   continue
-   nf_status(1) = nf_INQ_DIMID(ncid, 'latitude', dimid)
-   nf_status(2) = nf_INQ_DIMLEN(ncid, dimid, nx)
-   nf_status(3) = nf_INQ_DIMID(ncid, 'longitude', dimid)
-   nf_status(4) = nf_INQ_DIMLEN(ncid, dimid, ny)
-   if ( any(nf_status /= 0) ) then
-      write(0,*) 'Error reading dimensions'
-      stop
-   end if
-   return
-end subroutine read_GRB_dims
-
 subroutine read_CLP(ncid, nx, ny, cm)
    implicit none
    integer(i_kind),   intent(in)    :: ncid
@@ -548,6 +554,59 @@ subroutine read_CLP(ncid, nx, ny, cm)
 
    return
 end subroutine read_CLP
+
+subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   integer(i_kind),   intent(inout) :: cm(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_kind)                  :: imiss = -999
+   integer(i_kind)                  :: qf(nx,ny)
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudMaskQualFlag', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   qf(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         qf(i,j) = itmp_byte_2d(i,j)
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudMaskBinary', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   cm(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         if ( qf(i,j) == 0 ) then ! good quality
+            cm(i,j) = itmp_byte_2d(i,j)
+         end if
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   return
+end subroutine read_L2_BCM
 
 subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solzen, satzen, valid)
 
@@ -1066,9 +1125,9 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       read(fname(23:24), '(i2)')   iband
       read(fname(26:29), '(a4)')   region
       read(fname(31:33), '(a3)')   resolution
-      ! 2017-10-01T18:02:0.00Z
+      ! 2017-10-01T18:02:00.0Z
       !print*, syear, smonth, sday, shour, sminute
-      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
 
       jday = 0
       do i = 1, month - 1
@@ -1095,9 +1154,9 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       read(fname(31:34), '(a4)')   region
       read(fname(36:40), '(a5)')   pixelnumber
       read(fname(41:45), '(a5)')   linenumber
-      ! 2017-10-01T18:02:0.00Z
+      ! 2017-10-01T18:02:00.0Z
       !print*, syear, smonth, sday, shour, sminute
-      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
 
       jday = 0
       do i = 1, month - 1
@@ -1122,7 +1181,8 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       call get_date(year, jday, month, day)
       write(smonth, '(i2)') month
       write(sday, '(i2)') day
-      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.00Z'
+      ! 2017-10-01T18:02:00.0Z
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
 
    else if ( (is_BCM .or. is_Phase .or. is_HT) .and. (satid == 'H09') ) then
       !AHI-CMSK_v1r1_h09_s202308161430206_e202308161439400_c202308161452133.nc
@@ -1141,11 +1201,11 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       read(fname(32:33), '(a2)')   ssec1
       read(fname(34:34), '(a1)')   sec2   ! decimal part of second
       read(fname(34:34), '(a1)')   ssec2
-      resolution = 'R10'
+      resolution = 'R20'
       region = 'FLDK'
-      ! 2017-10-01T18:02:0.00Z
+      ! 2017-10-01T18:02:00.0Z
       !print*, syear, smonth, sday, shour, sminute
-      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':'//ssec1//'.'//ssec2//'0Z'
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':'//ssec1//'Z'
 
       jday = 0
       do i = 1, month - 1

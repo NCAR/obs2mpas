@@ -75,6 +75,8 @@ module  mod_goes_abi
    integer(i_kind) :: ntime
    integer(i_kind) :: t_index
    integer(i_kind) :: band_id
+   character(len=10) :: xlat
+   character(len=10) :: ylon
 
    real(r_kind)                    :: sdtb ! to be done
    integer(i_kind)                 :: ifile, nlen
@@ -229,7 +231,9 @@ subroutine Goes_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out, go
          end if
 
          if ( .not. got_grid_info ) then
-            call read_GRB_dims(ncid, nx, ny)
+            xlat = 'x'
+            ylon = 'y'
+            call read_GRB_dims(ncid, xlat, ylon, nx, ny)
             allocate (glat(nx, ny))
             allocate (glon(nx, ny))
             allocate (gzen(nx, ny))
@@ -427,25 +431,6 @@ subroutine Goes_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out, go
    deallocate(is_PRES) !BJJ
 
 end subroutine Goes_ReBroadcast_converter
-
- 
-subroutine read_GRB_dims(ncid, nx, ny)
-   implicit none
-   integer(i_kind), intent(in)  :: ncid
-   integer(i_kind), intent(out) :: nx, ny
-   integer(i_kind)              :: dimid
-   integer(i_kind)              :: nf_status(4)
-   continue
-   nf_status(1) = nf_INQ_DIMID(ncid, 'x', dimid)
-   nf_status(2) = nf_INQ_DIMLEN(ncid, dimid, nx)
-   nf_status(3) = nf_INQ_DIMID(ncid, 'y', dimid)
-   nf_status(4) = nf_INQ_DIMLEN(ncid, dimid, ny)
-   if ( any(nf_status /= 0) ) then
-      write(0,*) 'Error reading dimensions'
-      stop
-   end if
-   return
-end subroutine read_GRB_dims
 
 !NC_BYTE 8-bit signed integer
 !NC_SHORT 16-bit signed integer

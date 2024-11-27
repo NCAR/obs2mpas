@@ -1191,7 +1191,7 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
 
       ! get month and day from julian day
       call get_date(year, jday, month, day)
-      write(smonth, '(i2)') month
+      write(smonth, '(i2.2)') month
       write(sday, '(i2)') day
       ! 2017-10-01T18:02:00.0Z
       file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'

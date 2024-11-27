@@ -32,17 +32,17 @@ module mod_himawari_ahi
   implicit none
 
   ! prefix for Cloud Property from ftp.ptree.jaxa.jp
-  character(len=15), parameter :: CLP_id     = 'L2CLP'
+  character(len=15), parameter :: CLP_id       = 'L2CLP'
 
   ! prefix for Cloud Mask (Binary Cloud Mask) from AWS NOAA
   ! prefix for Himawari-8 data on AWS (https://noaa-himawari8.s3.amazonaws.com/index.html)
-  character(len=14), parameter :: BCM08_id   = 'CLOUD_MASK'
-  character(len=15), parameter :: HT08_id    = 'CLOUD_HEIGHT'
-  character(len=15), parameter :: Phase08_id = 'CLOUD_PHASE'
+  character(len=14), parameter :: BCM_id_old   = 'CLOUD_MASK'
+  character(len=15), parameter :: HT_id_old    = 'CLOUD_HEIGHT'
+  character(len=15), parameter :: Phase_id_old = 'CLOUD_PHASE'
   ! prefix for Himawari-9 data on AWS (https://noaa-himawari9.s3.amazonaws.com/index.html)
-  character(len=14), parameter :: BCM09_id   = 'CMSK'
-  character(len=15), parameter :: HT09_id    = 'CHGT'
-  character(len=15), parameter :: Phase09_id = 'CPHS'
+  character(len=14), parameter :: BCM_id_new   = 'CMSK'
+  character(len=15), parameter :: HT_id_new    = 'CHGT'
+  character(len=15), parameter :: Phase_id_new = 'CPHS'
 
   integer(i_kind) :: mmday(12) = (/31,28,31,30,31,30,31,31,30,31,30,31/)
   integer(i_kind), parameter :: npixel = 5500
@@ -78,8 +78,6 @@ module mod_himawari_ahi
   integer(i_kind)    :: iband, jday
 
   character(len=256) :: out_fname
-  character(len=10)  :: xlat
-  character(len=10)  :: ylon
 
   character(len=22), allocatable  :: scan_time(:) ! 2017-10-01T18:02:19.6Z
   integer(i_kind),   allocatable  :: fband_id(:)
@@ -422,9 +420,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
             write(0,*) 'ERROR reading '//trim(ffname)
             cycle file_loop2
          end if
-         xlat = 'latitude'
-         ylon = 'longitude'
-         call read_GRB_dims(ncid, xlat, ylon, nx, ny)
+         call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
          allocate (cm_2d(nx, ny))
          call read_CLP(ncid, nx, ny, cm_2d)
          if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
@@ -443,12 +439,12 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
             write(0,*) 'ERROR reading '//trim(ffname)
             cycle file_loop2
          end if
-         xlat = 'x'
-         ylon = 'y'
-         call read_GRB_dims(ncid, xlat, ylon, nx, ny)
+         call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
          allocate (cm_2d(nx, ny))
          call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
-         if ( time_start(it) /= scan_time(ifile) ) then
+         if ( is_empty_string(time_start(it)) ) then
+            continue
+         else if ( time_start(it) /= scan_time(ifile) ) then
             write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
             cycle file_loop2
          end if
@@ -1063,43 +1059,41 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
    logical,           intent(out) :: is_HT
    logical,           intent(out) :: is_Phase
 
+   integer(i_kind)   :: isegm
    character(len=4)  :: syear
    character(len=2)  :: smonth, sday, shour, sminute, ssec1
    character(len=1)  :: ssec2
-   character(len=3)  :: version
+   character(len=4)  :: version
    character(len=5)  :: pixelnumber, linenumber
    integer(i_kind)   :: year, month, day, hour, minute, sec, sec1, sec2
 
-   !CLP_id: NC_H08_20180512_1800_L2CLP010_FLDK.02401_02401.nc
-   !BCM08_id: Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
-   !BCM09_id: AHI-CMSK_v1r1_h09_s202308161430206_e202308161439400_c202308161452133.nc
+   !CLP_id:     NC_H08_20180512_1800_L2CLP010_FLDK.02401_02401.nc
+   !BCM_id_old: Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
+   !            Himawari8_AHI_2KM_FLDK_2021023_0000_20_CLOUD_MASK_EN.nc
+   !BCM_id_new: AHI-CMSK_v1r0_h08_s202103230300208_e202103230300542_c202103231944583.nc
+   !            AHI-CMSK_v1r1_h09_s202308161430206_e202308161439400_c202308161452133.nc
 
-   if ( fname( 22:26) == CLP_id ) then
+   isegm = -99
+   if ( fname(22:26) == CLP_id ) then
       is_CLP = .true.
       iband  = -99
-   else if ( fname( 35:44) == BCM08_id ) then
+   else if ( fname(36:45) == BCM_id_old .or. fname( 40:49) == BCM_id_old ) then
       is_BCM = .true.
-      satid = 'H08'
       iband = -99
-   else if ( fname( 35:46) == HT08_id ) then
+   else if ( fname(36:45) == HT_id_old .or. fname( 40:49) == HT_id_old ) then
       is_HT = .true.
-      satid = 'H08'
       iband = -99
-   else if ( fname( 35:46) == Phase08_id ) then
+   else if ( fname(36:45) == Phase_id_old .or. fname( 40:49) == Phase_id_old ) then
       is_Phase = .true.
-      satid = 'H08'
       iband = -99
-   else if ( fname( 5:8) == BCM09_id ) then
+   else if ( fname(5:8) == BCM_id_new ) then
       is_BCM = .true.
-      satid = 'H09'
       iband = -99
-   else if ( fname( 5:8) == HT09_id ) then
+   else if ( fname(5:8) == HT_id_new ) then
       is_HT = .true.
-      satid = 'H09'
       iband = -99
-   else if ( fname( 5:8) == Phase09_id ) then
+   else if ( fname(5:8) == Phase_id_new ) then
       is_Phase = .true.
-      satid = 'H09'
       iband = -99
    else
       is_CLP   = .false.
@@ -1109,7 +1103,7 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
    end if
 
    if ( .not. ( is_CLP .or. is_BCM .or. is_Phase .or. is_HT ) ) then
-      !HS_H08_20180415_0050_B03_FLDK_R05_S0101.DAT
+      !HS_H08_20210123_0000_B07_FLDK_R20_S0110.DAT
       read(fname(1:2),   '(a2)')   finfo
       read(fname(4:6),   '(a3)')   satid
       read(fname(8:11),  '(i4)')   year
@@ -1125,6 +1119,7 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       read(fname(23:24), '(i2)')   iband
       read(fname(26:29), '(a4)')   region
       read(fname(31:33), '(a3)')   resolution
+      read(fname(36:37), '(i2)')   isegm
       ! 2017-10-01T18:02:00.0Z
       !print*, syear, smonth, sday, shour, sminute
       file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
@@ -1164,19 +1159,36 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       end do
       jday = jday + day
 
-   else if ( (is_BCM .or. is_Phase .or. is_HT) .and. (satid == 'H08') ) then
-      !Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
+   else if ( (is_BCM .or. is_Phase .or. is_HT) .and. (fname(1:9) == 'Himawari8') ) then
       finfo = 'HS'
-      resolution = 'R50'
-      region = 'FLDK'
-      read(fname(20:23), '(i4)')   year
-      read(fname(20:23), '(a4)')   syear
-      read(fname(24:26), '(i3)')   jday
-      read(fname(28:29), '(i2)')   hour
-      read(fname(28:29), '(a2)')   shour
-      read(fname(30:31), '(i2)')   minute
-      read(fname(30:31), '(a2)')   sminute
-      read(fname(33:34), '(i2)')   sec
+      if ( fname(15:17) == '2KM' ) then
+         ! from 1610Z 2 July 2020 to 1450Z 22 March 2021
+         !Himawari8_AHI_2KM_FLDK_2021023_0000_20_CLOUD_MASK_EN.nc
+         resolution = 'R20'
+         satid = 'H08'
+         read(fname(19:22), '(a4)')   region
+         read(fname(24:27), '(i4)')   year
+         read(fname(24:27), '(a4)')   syear
+         read(fname(28:30), '(i3)')   jday
+         read(fname(32:33), '(i2)')   hour
+         read(fname(32:33), '(a2)')   shour
+         read(fname(34:35), '(i2)')   minute
+         read(fname(34:35), '(a2)')   sminute
+      else
+         ! from 11 Dec 2019 to 1600Z 2 July 2020
+         !Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
+         resolution = 'R50'
+         satid = 'H08'
+         read(fname(15:18), '(a4)')   region
+         read(fname(20:23), '(i4)')   year
+         read(fname(20:23), '(a4)')   syear
+         read(fname(24:26), '(i3)')   jday
+         read(fname(28:29), '(i2)')   hour
+         read(fname(28:29), '(a2)')   shour
+         read(fname(30:31), '(i2)')   minute
+         read(fname(30:31), '(a2)')   sminute
+      end if
+
       ! get month and day from julian day
       call get_date(year, jday, month, day)
       write(smonth, '(i2)') month
@@ -1184,9 +1196,14 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       ! 2017-10-01T18:02:00.0Z
       file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
 
-   else if ( (is_BCM .or. is_Phase .or. is_HT) .and. (satid == 'H09') ) then
+   else if ( (is_BCM .or. is_Phase .or. is_HT) .and. (fname(1:3) == 'AHI') ) then
+      !AHI-CMSK_v1r0_h08_s202103230300208_e202103230300542_c202103231944583.nc
       !AHI-CMSK_v1r1_h09_s202308161430206_e202308161439400_c202308161452133.nc
       finfo = 'HS'
+      resolution = 'R20'
+      region = 'FLDK'
+      read(fname(10:13), '(a4)')   version
+      read(fname(15:17), '(a3)')   satid
       read(fname(20:23), '(i4)')   year
       read(fname(20:23), '(a4)')   syear
       read(fname(24:25), '(i2)')   month
@@ -1201,8 +1218,6 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       read(fname(32:33), '(a2)')   ssec1
       read(fname(34:34), '(a1)')   sec2   ! decimal part of second
       read(fname(34:34), '(a1)')   ssec2
-      resolution = 'R20'
-      region = 'FLDK'
       ! 2017-10-01T18:02:00.0Z
       !print*, syear, smonth, sday, shour, sminute
       file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':'//ssec1//'Z'

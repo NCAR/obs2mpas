@@ -75,8 +75,6 @@ module  mod_goes_abi
    integer(i_kind) :: ntime
    integer(i_kind) :: t_index
    integer(i_kind) :: band_id
-   character(len=10) :: xlat
-   character(len=10) :: ylon
 
    real(r_kind)                    :: sdtb ! to be done
    integer(i_kind)                 :: ifile, nlen
@@ -231,9 +229,7 @@ subroutine Goes_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out, go
          end if
 
          if ( .not. got_grid_info ) then
-            xlat = 'x'
-            ylon = 'y'
-            call read_GRB_dims(ncid, xlat, ylon, nx, ny)
+            call read_GRB_dims(ncid, 'x', 'y', nx, ny)
             allocate (glat(nx, ny))
             allocate (glon(nx, ny))
             allocate (gzen(nx, ny))

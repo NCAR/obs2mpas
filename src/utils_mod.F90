@@ -11,6 +11,23 @@ module utils_mod
 
    contains
 
+! Function to check if a string is empty (contains only spaces)
+logical function is_empty_string(s)
+  character(len=*) :: s
+  integer :: i
+
+  ! Loop through each character and check if any is non-space
+  do i = 1, len(s)
+    if (s(i:i) /= ' ') then
+       is_empty_string = .false.
+       return
+    end if
+  end do
+
+  ! If no non-space characters are found, it is empty
+  is_empty_string = .true.
+end function is_empty_string
+
 subroutine get_namelist_vars(nfile, fnames, list_files, data_dir, data_id, sat_id, n_subsample, write_iodav1)
 
    implicit none
@@ -130,8 +147,8 @@ end subroutine get_date
 subroutine read_GRB_dims(ncid, xlat, ylon, nx, ny)
    implicit none
    integer(i_kind),   intent(in) :: ncid
-   character(len=10), intent(in) :: xlat
-   character(len=10), intent(in) :: ylon
+   character(len=*),  intent(in) :: xlat
+   character(len=*),  intent(in) :: ylon
    integer(i_kind),   intent(out):: nx, ny
    integer(i_kind)               :: dimid
    integer(i_kind)               :: nf_status(4)

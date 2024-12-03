@@ -92,6 +92,16 @@ module  mod_goes_abi
    integer(i_kind),   allocatable  :: ftime_id(:)
    integer(i_kind),   allocatable  :: julianday(:)
 
+   integer(i_kind)                 :: nfile
+   character(len=256), allocatable :: nc_fnames(:)
+
+   character(len=256)              :: nc_list_file  ! the text file that contains a list of netcdf files to process
+   character(len=256)              :: data_dir
+   character(len=18)               :: data_id
+   character(len=3)                :: sat_id
+   integer(i_kind)                 :: n_subsample
+   logical                         :: write_iodav1
+
    contains
 
 
@@ -105,16 +115,6 @@ subroutine Goes_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out, go
    logical,           allocatable, intent(out) :: got_latlon_out(:,:)  ! (nx,ny)
    ! loc
    integer :: ix
-
-   integer(i_kind)                 :: nfile
-   character(len=256), allocatable :: nc_fnames(:)
-
-   character(len=256)              :: nc_list_file  ! the text file that contains a list of netcdf files to process
-   character(len=256)              :: data_dir
-   character(len=18)               :: data_id
-   character(len=3)                :: sat_id
-   integer(i_kind)                 :: n_subsample
-   logical                         :: write_iodav1
 
    ! get namelist variables
    call get_namelist_vars(nfile, nc_fnames, nc_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1)

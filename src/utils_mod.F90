@@ -11,6 +11,20 @@ module utils_mod
 
    contains
 
+! Function to convert a string to uppercase
+function to_upper(s)
+    character(len=*), intent(in) :: s
+    character(len=len(s)) :: to_upper
+    integer :: i
+
+    to_upper = s
+    do i = 1, len(s)
+        if (iachar(to_upper(i:i)) >= iachar('a') .and. iachar(to_upper(i:i)) <= iachar('z')) then
+            to_upper(i:i) = achar(iachar(to_upper(i:i)) - iachar('a') + iachar('A'))
+        end if
+    end do
+end function to_upper
+
 ! Function to check if a string is empty (contains only spaces)
 logical function is_empty_string(s)
   character(len=*) :: s
@@ -32,8 +46,8 @@ subroutine get_namelist_vars(nfile, fnames, list_files, data_dir, data_id, sat_i
 
    implicit none
 
-   integer(i_kind),                 intent(out)   ::  nfile
-   character(len=256), allocatable, intent(inout) ::  fnames(:)
+   integer(i_kind),                 intent(out) ::  nfile
+   character(len=256), allocatable, intent(out) ::  fnames(:)
 
    integer(i_kind)                 :: nml_unit = 81
    integer(i_kind)                 :: iunit    = 87
@@ -99,7 +113,7 @@ subroutine get_namelist_vars(nfile, fnames, list_files, data_dir, data_id, sat_i
       end do
       if ( nfile > 0 ) then
          allocate (fnames(nfile))
-         !read the list_files again to get the netcdf file names
+         !read the list_files again to get the file names
          rewind(iunit)
          do ifile = 1, nfile
             read(unit=iunit, fmt='(a)', iostat=istat) fnames(ifile)

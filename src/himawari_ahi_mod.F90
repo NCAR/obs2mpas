@@ -1,13 +1,15 @@
 !----------------------------------------------------------------------
-! Code adapted from 
+! Code adapted from
 !    https://github.com/NCAR/obs2ioda/blob/main/obs2ioda-v2/src/hsd.f90
 !----------------------------------------------------------------------
 !
 module mod_himawari_ahi
 !
-! Purpose: Get Himawari Standard Data (HSD) lat, lon, bt, etc and pass it back to main
-!          Convert HSD files to ioda-v1 format.
-!          Currently only processes bands 7-16.
+! Purpose:
+!     1. Get Himawari Standard Data (HSD) lat, lon, bt, etc and pass it back to main
+!        Convert HSD files to ioda-v1 format.
+!        Currently only processes bands 7-16.
+!     2. Get Himawari cloud mask or cloud type NetCDF data and add it to the data structure
 !
 ! input files:
 !    (2) namelist.obs2model
@@ -19,27 +21,27 @@ module mod_himawari_ahi
 !          n_subsample = 1,             ! value use for thinning if write_iodav1 = .true.
 !          write_iodav1 = .false.,      ! option to write out an iodav1 file (no superobbing)
 !        /
+!
+! TODO: implement get brigthness temperature directly from NetCDF files (from ftp.ptree.jaxa.jp)
 
   use netcdf_mod, only: open_netcdf_for_write, close_netcdf, &
                         def_netcdf_dims, def_netcdf_var, &
                         def_netcdf_end, put_netcdf_var
 
-  !use utils_mod, only: get_julian_time
-
   use control_para !BJJ
   use utils_mod
-   
+
   implicit none
 
   ! prefix for Cloud Property from ftp.ptree.jaxa.jp
   character(len=15), parameter :: CLP_id       = 'L2CLP'
 
   ! prefix for Cloud Mask (Binary Cloud Mask) from AWS NOAA
-  ! prefix for Himawari-8 data on AWS (https://noaa-himawari8.s3.amazonaws.com/index.html)
+  ! prefix for Himawari (8) data on AWS (https://noaa-himawari8.s3.amazonaws.com/index.html)
   character(len=14), parameter :: BCM_id_old   = 'CLOUD_MASK'
   character(len=15), parameter :: HT_id_old    = 'CLOUD_HEIGHT'
   character(len=15), parameter :: Phase_id_old = 'CLOUD_PHASE'
-  ! prefix for Himawari-9 data on AWS (https://noaa-himawari9.s3.amazonaws.com/index.html)
+  ! prefix for Himawari (8 and 9) data on AWS (https://noaa-himawari9.s3.amazonaws.com/index.html)
   character(len=14), parameter :: BCM_id_new   = 'CMSK'
   character(len=15), parameter :: HT_id_new    = 'CHGT'
   character(len=15), parameter :: Phase_id_new = 'CPHS'
@@ -48,19 +50,15 @@ module mod_himawari_ahi
   integer(i_kind), parameter :: npixel = 5500
   integer(i_kind), parameter :: nline  = 5500
   integer(i_kind), parameter :: nband = 10  ! number of infrared bands
+  integer(i_kind), parameter :: nsegm = 10  ! number of segment
   integer(i_kind)            :: band_start = 7
   integer(i_kind)            :: band_end   = 16
 
-  real(r_kind)               :: brit(npixel, nline)
+  real(r_kind)               :: brit(npixel, nline, nband)
   real(r_double)             :: rlat, rlon, lon_diff, tmp1, theta1, theta2
   integer(i_kind)            :: ntotal, npix, nlin
   real(r_kind), allocatable  :: gsolzen(:,:)  ! satellite zenith angle (nx,ny)
   real(r_kind), allocatable  :: gsatzen(:,:)  ! solar zenith angle (nx,ny)
-  
-  integer(i_kind)    :: nfile
-  integer(i_kind)    :: ifile
-  character(len=512) :: ffname
-  logical            :: isfile
 
   character(len=256) :: hs_list_file  ! the text file that contains a list of files to process
   character(len=256) :: data_dir
@@ -69,23 +67,22 @@ module mod_himawari_ahi
   integer(i_kind)    :: n_subsample
   logical            :: write_iodav1
 
-  character(len=256), allocatable :: hs_fnames(:)
+  integer(i_kind)    :: nfile, ifile, iband
+  character(len=512) :: ffname
+  logical            :: isfile
   character(len=2)   :: finfo
   character(len=3)   :: fsat_id
-  character(len=4)   :: region
-  character(len=3)   :: resolution
   character(len=22)  :: file_time
-  integer(i_kind)    :: iband, jday
-
   character(len=256) :: out_fname
 
-  character(len=22), allocatable  :: scan_time(:) ! 2017-10-01T18:02:19.6Z
-  integer(i_kind),   allocatable  :: fband_id(:)
-  integer(i_kind),   allocatable  :: ftime_id(:)
-  integer(i_kind),   allocatable  :: julianday(:)
-  logical,           allocatable  :: valid(:), is_CLP(:), is_BCM(:), is_HT(:), is_Phase(:)
-
+  character(len=256), allocatable :: fnames(:)
+  character(len=22),  allocatable :: scan_time(:) ! 2017-10-01T18:02:19.6Z
   character(len=22), allocatable  :: time_start(:) ! (ntime) 2017-10-01T18:02:19.6Z
+  integer(i_kind),    allocatable :: fband_id(:)
+  integer(i_kind),    allocatable :: ftime_id(:)
+  integer(i_kind),    allocatable :: julianday(:)
+  logical,            allocatable :: valid(:), is_CLP(:), is_BCM(:), is_HT(:), is_Phase(:)
+  logical,            allocatable :: fexist(:)
 
   integer(i_kind) :: ncid, nf_status
   integer(i_kind) :: nx, ny
@@ -94,10 +91,11 @@ module mod_himawari_ahi
   integer(i_kind) :: t_index
   integer(i_kind) :: band_id
 
-  real(r_kind)                    :: sdtb ! to be done
-  logical                         :: found_time
+  logical              :: found_time
+  logical              :: got_hs, got_clp, got_cm, got_ht, got_phase
+  character(len=256)   :: cm_file, ht_file, phase_file
 
-  integer(i_kind), allocatable    :: cm_2d(:,:)   ! cloud_mask(nx,ny)
+  integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
 
   type rad_type
      real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
@@ -285,13 +283,14 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    logical,           allocatable, intent(out) :: got_latlon_out(:,:)  ! (nx,ny)
 
    ! get namelist variables
-   call get_namelist_vars(nfile, hs_fnames, hs_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1)
+   call get_namelist_vars(nfile, fnames, hs_list_file, data_dir, data_id, sat_id, n_subsample, write_iodav1)
 
    allocate (ftime_id(nfile))
    allocate (scan_time(nfile))
    allocate (fband_id(nfile))
    allocate (julianday(nfile))
    allocate (valid(nfile))
+   allocate (fexist(nfile))
    valid(:) = .false.
 
    allocate (is_CLP(nfile))
@@ -303,34 +302,29 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    is_Phase(:) = .false.
    is_HT(:)    = .false.
 
+   allocate (got_latlon_out(npixel, nline))
    allocate (glat_out(npixel, nline))
    allocate (glon_out(npixel, nline))
    allocate (gsolzen(npixel, nline))
    allocate (gsatzen(npixel, nline))
-   allocate (got_latlon_out(npixel, nline))
-   allocate (F_out(npixel, nline, nfile))
-   allocate (varname_out(nfile))
    glat_out(:,:)  = missing_r
    glon_out(:,:)  = missing_r
    gsolzen(:,:)   = missing_r
    gsatzen(:,:)   = missing_r
-   F_out(:,:,:)   = missing_r
-   varname_out(:) = ''
 
    ! parse the file list
    t_index = 0
    file_loop1: do ifile = 1, nfile
-     ffname = trim(data_dir)//'/'//trim(hs_fnames(ifile))
+     ffname = trim(data_dir)//'/'//trim(fnames(ifile))
      inquire(file=trim(ffname), exist=isfile)
      if ( .not. isfile ) then
         write(0,*) 'File not found: '//trim(ffname)
      else
-        write(0,*) 'File found: '//trim(ffname)         
+        write(0,*) 'File found: '//trim(ffname)
      end if
 
      ! retrieve some basic info from the filename itself
-     call decode_himawari_name(trim(hs_fnames(ifile)), finfo, fband_id(ifile), fsat_id, scan_time(ifile), region, resolution, julianday(ifile), is_CLP(ifile), is_BCM(ifile), is_Phase(ifile), is_HT(ifile))
-
+     call decode_himawari_name(trim(fnames(ifile)), finfo, fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile), is_CLP(ifile), is_BCM(ifile), is_Phase(ifile), is_HT(ifile))
      if ( fsat_id /= sat_id ) then
         cycle file_loop1
      end if
@@ -347,6 +341,21 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
               write(0,*) 'Infrared band ', fband_id(ifile), ' NOT supported'
               cycle file_loop1
            end if
+        end if
+        got_hs = .true.
+     else
+        if ( is_CLP(ifile) ) then
+           got_clp = .true.
+           cm_file = fnames(ifile)
+        else if ( is_BCM(ifile) ) then
+           got_cm = .true.
+           cm_file = fnames(ifile)
+        else if ( is_Phase(ifile) ) then
+           got_phase = .true.
+           phase_file = fnames(ifile)
+        else if ( is_HT(ifile) ) then
+           got_ht = .true.
+           ht_file = fnames(ifile)
         end if
      end if
 
@@ -380,93 +389,100 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
       write(0,*) 'ntime = ', ntime
       write(0,*) 'No valid files found from hs_list_file '//trim(hs_list_file)
       stop
+   else if ( ntime > 1 ) then
+      write(0,*) 'ntime = ', ntime
+      write(0,*) 'Multiple time file NOT supported yet'
+      stop
+   else
+      it = ftime_id(1)
    end if
 
    allocate (time_start(ntime))
    allocate (rdata(ntime))
 
-   file_loop2: do ifile = 1, nfile
+   if ( got_clp .or. got_cm ) then
+      allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+      allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+   else
+      allocate (F_out(npixel, nline, nband))
+      allocate (varname_out(nband))
+   end if
+   F_out(:,:,:)   = missing_r
+   varname_out(:) = ''
 
-     if ( valid(ifile) ) then
-     
-       ffname = trim(data_dir)//'/'//trim(hs_fnames(ifile))
+   if ( any(valid) ) then
+      if ( got_hs ) then
+         call read_HSD(data_dir, fnames, fsat_id, julianday, glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
+         F_out(1:npixel,1:nline,1:nband) = brit(1:npixel,1:nline,1:nband)
 
-       if ( .not. ( is_CLP(ifile) .or. is_BCM(ifile) .or. is_Phase(ifile) &
-                  .or. is_HT(ifile) ) ) then
-         call read_HSD(ffname, fband_id(ifile), fsat_id, julianday(ifile), glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
-         write(15,*) ifile, scan_time(ifile), julianday(ifile)
-         F_out(:,:,ifile) = brit(:,:)
-
-         it = ftime_id(ifile)
-         ib = fband_id(ifile)
-
-         if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband, npixel, nline))
-         if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband, npixel, nline))
-         if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband, npixel, nline))
+         if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,npixel, nline))
+         if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,npixel, nline))
+         if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband,npixel, nline))
          if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
 
-         rdata(it)%bt(ib-band_start+1,:,:)  = brit(:,:)
-         rdata(it)%rad(ib-band_start+1,:,:) = missing_r !rad_2d(i,j)
-         rdata(it)%qf(ib-band_start+1,:,:)  = missing_r !qf_2d(i,j)
-         rdata(it)%sd(ib-band_start+1)      = missing_r !sdtb
+         do ib = 1, nband
+            do j = 1, nline
+               do i = 1, npixel
+                  rdata(it)%rad(ib, i, j) = missing_r
+                  rdata(it)%bt(ib, i, j) = brit(i, j, ib)
+                  rdata(it)%qf(ib, i, j) = missing_r
+                  rdata(it)%sd(ib) = missing_r
+               end do
+            end do
+            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib
+         end do
+         write(15,*) it, scan_time(it), julianday(it)
+      end if
+      if ( got_clp ) then
+            ffname = trim(data_dir)//'/'//trim(cm_file)
+            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+            if ( nf_status == 0 ) then
+               write(0,*) 'Reading '//trim(ffname)
+            else
+               write(0,*) 'ERROR reading '//trim(ffname)
+               stop 1
+            end if
+            call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
+            allocate (cm_2d(nx, ny))
+            call read_CLP(ncid, nx, ny, cm_2d)
+            if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+            rdata(it)%cm(:,:) = cm_2d(:,:)
+            F_out(:,:,nband+1) = cm_2d(:,:)
+            varname_out(nband+1) = 'BCM_'//fsat_id
+      else
+         if ( got_cm ) then
+            ffname = trim(data_dir)//'/'//trim(cm_file)
+            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+            if ( nf_status == 0 ) then
+               write(0,*) 'Reading '//trim(ffname)
+            else
+               write(0,*) 'ERROR reading '//trim(ffname)
+               stop
+            end if
+            call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
+            allocate (cm_2d(nx, ny))
+            call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
+            if ( is_empty_string(time_start(it)) ) then
+               continue
+            else if ( time_start(it)(1:16) /= scan_time(it)(1:16) ) then
+               write(0,*) 'ERROR: scan start time (up to the minute) from the file name and the file content do not match.'
+               stop
+            end if
+            if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+            rdata(it)%cm(:,:) = cm_2d(:,:)
+            F_out(:,:,nband+1) = cm_2d(:,:)
+            varname_out(nband+1) = 'BCM_'//fsat_id
 
-         write(varname_out(ifile),"(A,I2.2)") 'BT_'//fsat_id//'C', ib
-
-       else if ( is_CLP(ifile) ) then
-         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
-         if ( nf_status == 0 ) then
-            write(0,*) 'Reading '//trim(ffname)
-         else
-            write(0,*) 'ERROR reading '//trim(ffname)
-            cycle file_loop2
+         else if ( got_ht .or. got_phase ) then
+            write(0,*) 'ERROR: reading these files is NOT implemented YET'
+            stop 1
          end if
-         call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
-         allocate (cm_2d(nx, ny))
-         call read_CLP(ncid, nx, ny, cm_2d)
-         if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
-         rdata(it)%cm(:,:) = cm_2d(:,:)
-
-         !BJJ copy to output array: use ifile index
-         F_out(:,:,ifile) = cm_2d(:,:)
-
-         varname_out(ifile) = 'BCM_'//fsat_id
-
-       else if ( is_BCM(ifile) ) then
-         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
-         if ( nf_status == 0 ) then
-            write(0,*) 'Reading '//trim(ffname)
-         else
-            write(0,*) 'ERROR reading '//trim(ffname)
-            cycle file_loop2
-         end if
-         call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
-         allocate (cm_2d(nx, ny))
-         call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
-         if ( is_empty_string(time_start(it)) ) then
-            continue
-         else if ( time_start(it) /= scan_time(ifile) ) then
-            write(0,*) 'ERROR: scan start time from the file name and the file content do not match.'
-            cycle file_loop2
-         end if
-         if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
-         rdata(it)%cm(:,:) = cm_2d(:,:)
-
-         !BJJ copy to output array: use ifile index
-         F_out(:,:,ifile) = cm_2d(:,:)
-
-         varname_out(ifile) = 'BCM_'//fsat_id
-
-       else if ( is_HT(ifile) .or. is_Phase(ifile) ) then
-       else
-         write(0,*) 'ERROR: something is wrong. Check the files'
-         stop
-       end if
-
-       nf_status = nf_CLOSE(ncid)
-
-     end if
-
-   end do file_loop2
+      nf_status = nf_CLOSE(ncid)
+      end if
+   else
+      write(0,*) 'ERROR: No valid files. Check the files'
+      stop 1
+   end if
 
    if ( allocated(cm_2d) )  deallocate(cm_2d)
 
@@ -489,21 +505,25 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
       end do
    end if
 
+   if ( allocated(gsatzen) ) deallocate(gsatzen)
+   if ( allocated(gsolzen) ) deallocate(gsolzen)
+
    do it = 1, ntime
       if ( allocated(rdata(it)%rad) ) deallocate (rdata(it)%rad)
       if ( allocated(rdata(it)%bt)  ) deallocate (rdata(it)%bt)
       if ( allocated(rdata(it)%qf)  ) deallocate (rdata(it)%qf)
       if ( allocated(rdata(it)%cm)  ) deallocate (rdata(it)%cm)
    end do
-   if ( allocated(gsatzen) ) deallocate(gsatzen)
-   if ( allocated(gsolzen) ) deallocate(gsolzen)
    deallocate(rdata)
-   deallocate(hs_fnames)
+   deallocate(time_start)
+
+   deallocate(fnames)
    deallocate(ftime_id)
    deallocate(scan_time)
    deallocate(fband_id)
    deallocate(julianday)
    deallocate(valid)
+   deallocate(fexist)
 
    deallocate(is_CLP)
    deallocate(is_BCM)
@@ -537,7 +557,7 @@ subroutine read_CLP(ncid, nx, ny, cm)
    cm(:,:) = imiss
    do j = 1, ny
       do i = 1, nx
-         if ( (itmp_short_2d(i,j) /= ifill) .or. (itmp_short_2d(i,j) /= 10) ) then
+         if ( (itmp_short_2d(i,j) /= ifill) ) then !.or. (itmp_short_2d(i,j) /= 10) ) then
             if (itmp_short_2d(i,j) == 0 ) then ! clear pixel
                cm(i,j) = 0
             else
@@ -604,21 +624,22 @@ subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
    return
 end subroutine read_L2_BCM
 
-subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solzen, satzen, valid)
+subroutine read_HSD(data_dir, hsd_fnames, satid, jday, longitude, latitude, brit, solzen, satzen, valid)
 
   implicit none
+  character(len=256), intent(in) :: data_dir
+  character(len=256), intent(in) :: hsd_fnames(:)
+  character(len=3),   intent(in) :: satid
+  integer(i_kind),    intent(in) :: jday(:)
+  real(r_single),    intent(out) :: longitude(npixel, nline)
+  real(r_single),    intent(out) :: latitude(npixel, nline)
+  real(r_single),    intent(out) :: brit(npixel, nline, nband)
+  real(r_single),    intent(out) :: solzen(npixel, nline)
+  real(r_single),    intent(out) :: satzen(npixel, nline)
+  logical,           intent(out) :: valid(npixel, nline)
 
-  character(len=256),intent(in)  :: ffname
-  integer(i_kind),   intent(in)  :: iband
-  character(len=3),  intent(in)  :: satid
-  integer(i_kind),   intent(in)  :: jday
-  real(r_single),   intent(out)  :: longitude(npixel, nline)
-  real(r_single),   intent(out)  :: latitude(npixel, nline)
-  real(r_single),   intent(out)  :: brit(npixel, nline)
-  real(r_single),   intent(out)  :: solzen(npixel, nline)
-  real(r_single),   intent(out)  :: satzen(npixel, nline)
-  logical,          intent(out)  :: valid(npixel, nline)
-   
+  integer(i_kind) :: iband, isegm
+
   integer(i_short), allocatable  :: idata(:)
   integer(i_kind) :: numCorrect
   integer(i_kind) :: numObs
@@ -626,8 +647,7 @@ subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solze
   integer(i_kind) :: startLine, endLine
   integer(i_kind) :: radcount, i, ii, jj, ij, iv
   integer(i_kind) :: ierr
-  integer(i_kind) :: nlocs, nvars, iloc
-  integer(i_kind) :: ihh, imm, idd, flength, rvalue, offset
+  integer(i_kind) :: ihh, imm, flength, rvalue, offset
   integer(i_kind) :: iunit = 21
   real(r_double)  :: lon, lat
   real(r_double)  :: radiance, tbb
@@ -638,223 +658,237 @@ subroutine read_HSD(ffname, iband, satid, jday, longitude, latitude, brit, solze
 
   longitude(:,:) = missing_r
   latitude(:,:)  = missing_r
-  brit(:,:)      = missing_r
+  brit(:,:,:)    = missing_r
   solzen(:,:)    = missing_r
   satzen(:,:)    = missing_r
   valid(:,:)     = .false.
 
-  open(iunit, file=trim(ffname), form='unformatted', action='read', access='stream', status='old', convert='little_endian')
-  print*,'Reading from ', trim(ffname)
+do iband = 1, nband
+   do isegm = 1, nsegm
+      ifile = isegm + (iband-1) * nsegm
+      if ( hsd_fnames(ifile)(1:2) /= 'HS' ) cycle
+      ffname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
+      read(hsd_fnames(ifile)(14:15), '(i2)')   ihh
+      read(hsd_fnames(ifile)(19:20), '(i2)')   imm
+      inquire(file=ffname, exist=fexist(ifile))
+      if (.not. fexist(ifile)) then
+         print *, 'File not found: ', trim(ffname)
+         cycle
+      end if
+      open(iunit, file=trim(ffname), form='unformatted', action='read', access='stream', status='old', convert='little_endian')
+      print*,'Reading from ', trim(ffname)
 
-  read(iunit) header%basic%headerNum, &
-              header%basic%blockLen, &
-              header%basic%numHeader, &
-              header%basic%byteOrder, &
-              header%basic%satName, &
-              header%basic%procCenter, &
-              header%basic%obsArea, &
-              header%basic%dummy2, &
-              header%basic%hhnn, &
-              header%basic%obsStartTime, &
-              header%basic%obsEndTime, &
-              header%basic%fileCreateTime, &
-              header%basic%totalHeaderLen, &
-              header%basic%dataLen, &
-              header%basic%qcflag1, &
-              header%basic%qcflag2, &
-              header%basic%qcflag3, &
-              header%basic%qcflag4, &
-              header%basic%version, &
-              header%basic%fileName, &
-              header%basic%dummy40
-  read(iunit) header%data%headerNum, &
-              header%data%blockLen,&
-              header%data%bitPix, &
-              header%data%nPix, &
-              header%data%nLin, &
-              header%data%compression, &
-              header%data%dummy40
-  read(iunit) header%proj%headerNum, &
-              header%proj%blockLen, &
-              header%proj%subLon, &
-              header%proj%cfac, &
-              header%proj%lfac, &
-              header%proj%coff, &
-              header%proj%loff, &
-              header%proj%satDis, &
-              header%proj%eqtrRadius, &
-              header%proj%polrRadius, &
-              header%proj%projParam1, &
-              header%proj%projParam2, &
-              header%proj%projParam3, &
-              header%proj%projParamSd, &
-              header%proj%resampleKind, &
-              header%proj%resampleSize, &
-              header%proj%dummy40
-  read(iunit) header%navi%headerNum, &
-              header%navi%blockLen, &
-              header%navi%navTime, &
-              header%navi%sspLon, &
-              header%navi%sspLat, &
-              header%navi%satDis, &
-              header%navi%nadirLon, &
-              header%navi%nadirLat, &
-              header%navi%sunPos_x, &
-              header%navi%sunPos_y, &
-              header%navi%sunPos_z, &
-              header%navi%moonPos_x, &
-              header%navi%moonPos_y, &
-              header%navi%moonPos_z, &
-              header%navi%dummy40
-  read(iunit) header%calib%headerNum, &
-              header%calib%blockLen, &
-              header%calib%bandNo, &
-              header%calib%waveLen, &
-              header%calib%bitPix, &
-              header%calib%errorCount, &
-              header%calib%outCount, &
-              header%calib%gain_cnt2rad, &
-              header%calib%cnst_cnt2rad, &
-              header%calib%rad2btp_c0, &
-              header%calib%rad2btp_c1, &
-              header%calib%rad2btp_c2, &
-              header%calib%btp2rad_c0, &
-              header%calib%btp2rad_c1, &
-              header%calib%btp2rad_c2, &
-              header%calib%lightSpeed, &
-              header%calib%planckConst, &
-              header%calib%bolzConst, &
-              header%calib%dummy40
-  read(iunit) header%interCalib%headerNum, &
-              header%interCalib%blockLen, &
-              header%interCalib%dummy256
-  read(iunit) header%segm%headerNum, &
-              header%segm%blockLen, &
-              header%segm%totalSegNum, &
-              header%segm%segSeqNo, &
-              header%segm%startLineNo, &
-              header%segm%dummy40
-  read(iunit) header%navicorr%headerNum, &
-              header%navicorr%blockLen, &
-              header%navicorr%RoCenterColumn, &
-              header%navicorr%RoCenterLine, &
-              header%navicorr%RoCorrection, &
-              header%navicorr%correctNum
-  if ( header%navicorr%correctNum > 0 ) then
-     numCorrect = header%navicorr%correctNum
-     allocate(header%navicorr%lineNo(numCorrect))
-     allocate(header%navicorr%columnShift(numCorrect))
-     allocate(header%navicorr%lineShift(numCorrect))
-  end if
-  read(iunit) header%navicorr%lineNo(numCorrect), &
-              header%navicorr%columnShift(numCorrect), &
-              header%navicorr%lineShift(numCorrect), &
-              header%navicorr%dummy40
-  rewind(iunit)
-  read(iunit) header%obstime%headerNum, &
-              header%obstime%blockLen, &
-              header%obstime%obsNum
-  if ( header%obsTime%obsNum > 0 ) then
-     numObs = header%obsTime%obsNum
-     allocate(header%obsTime%lineNo(numObs))
-     allocate(header%obsTime%obsMJD(numObs))
-  end if
-  read(iunit) header%obstime%lineNo, &
-              header%obstime%obsMJD, &
-              header%obstime%dummy40
-  read(iunit) header%error%headerNum, &
-              header%error%blockLen, &
-              header%error%errorNum, &
-              header%error%dummy40
-  read(iunit) header%dummy%headerNum, &
-              header%dummy%blockLen, &
-              header%dummy%dummy256
-  npix = header%data%nPix
-  nlin = header%data%nLin
-  ntotal = npix * nlin
-  allocate(idata(ntotal))
+      read(iunit) header%basic%headerNum, &
+                  header%basic%blockLen, &
+                  header%basic%numHeader, &
+                  header%basic%byteOrder, &
+                  header%basic%satName, &
+                  header%basic%procCenter, &
+                  header%basic%obsArea, &
+                  header%basic%dummy2, &
+                  header%basic%hhnn, &
+                  header%basic%obsStartTime, &
+                  header%basic%obsEndTime, &
+                  header%basic%fileCreateTime, &
+                  header%basic%totalHeaderLen, &
+                  header%basic%dataLen, &
+                  header%basic%qcflag1, &
+                  header%basic%qcflag2, &
+                  header%basic%qcflag3, &
+                  header%basic%qcflag4, &
+                  header%basic%version, &
+                  header%basic%fileName, &
+                  header%basic%dummy40
+      read(iunit) header%data%headerNum, &
+                  header%data%blockLen,&
+                  header%data%bitPix, &
+                  header%data%nPix, &
+                  header%data%nLin, &
+                  header%data%compression, &
+                  header%data%dummy40
+      read(iunit) header%proj%headerNum, &
+                  header%proj%blockLen, &
+                  header%proj%subLon, &
+                  header%proj%cfac, &
+                  header%proj%lfac, &
+                  header%proj%coff, &
+                  header%proj%loff, &
+                  header%proj%satDis, &
+                  header%proj%eqtrRadius, &
+                  header%proj%polrRadius, &
+                  header%proj%projParam1, &
+                  header%proj%projParam2, &
+                  header%proj%projParam3, &
+                  header%proj%projParamSd, &
+                  header%proj%resampleKind, &
+                  header%proj%resampleSize, &
+                  header%proj%dummy40
+      read(iunit) header%navi%headerNum, &
+                  header%navi%blockLen, &
+                  header%navi%navTime, &
+                  header%navi%sspLon, &
+                  header%navi%sspLat, &
+                  header%navi%satDis, &
+                  header%navi%nadirLon, &
+                  header%navi%nadirLat, &
+                  header%navi%sunPos_x, &
+                  header%navi%sunPos_y, &
+                  header%navi%sunPos_z, &
+                  header%navi%moonPos_x, &
+                  header%navi%moonPos_y, &
+                  header%navi%moonPos_z, &
+                  header%navi%dummy40
+      read(iunit) header%calib%headerNum, &
+                  header%calib%blockLen, &
+                  header%calib%bandNo, &
+                  header%calib%waveLen, &
+                  header%calib%bitPix, &
+                  header%calib%errorCount, &
+                  header%calib%outCount, &
+                  header%calib%gain_cnt2rad, &
+                  header%calib%cnst_cnt2rad, &
+                  header%calib%rad2btp_c0, &
+                  header%calib%rad2btp_c1, &
+                  header%calib%rad2btp_c2, &
+                  header%calib%btp2rad_c0, &
+                  header%calib%btp2rad_c1, &
+                  header%calib%btp2rad_c2, &
+                  header%calib%lightSpeed, &
+                  header%calib%planckConst, &
+                  header%calib%bolzConst, &
+                  header%calib%dummy40
+      read(iunit) header%interCalib%headerNum, &
+                  header%interCalib%blockLen, &
+                  header%interCalib%dummy256
+      read(iunit) header%segm%headerNum, &
+                  header%segm%blockLen, &
+                  header%segm%totalSegNum, &
+                  header%segm%segSeqNo, &
+                  header%segm%startLineNo, &
+                  header%segm%dummy40
+      read(iunit) header%navicorr%headerNum, &
+                  header%navicorr%blockLen, &
+                  header%navicorr%RoCenterColumn, &
+                  header%navicorr%RoCenterLine, &
+                  header%navicorr%RoCorrection, &
+                  header%navicorr%correctNum
+      if ( header%navicorr%correctNum > 0 ) then
+         numCorrect = header%navicorr%correctNum
+         allocate(header%navicorr%lineNo(numCorrect))
+         allocate(header%navicorr%columnShift(numCorrect))
+         allocate(header%navicorr%lineShift(numCorrect))
+      end if
+      read(iunit) header%navicorr%lineNo(numCorrect), &
+                  header%navicorr%columnShift(numCorrect), &
+                  header%navicorr%lineShift(numCorrect), &
+                  header%navicorr%dummy40
+      rewind(iunit)
+      read(iunit) header%obstime%headerNum, &
+                  header%obstime%blockLen, &
+                  header%obstime%obsNum
+      if ( header%obsTime%obsNum > 0 ) then
+         numObs = header%obsTime%obsNum
+         allocate(header%obsTime%lineNo(numObs))
+         allocate(header%obsTime%obsMJD(numObs))
+      end if
+      read(iunit) header%obstime%lineNo, &
+                  header%obstime%obsMJD, &
+                  header%obstime%dummy40
+      read(iunit) header%error%headerNum, &
+                  header%error%blockLen, &
+                  header%error%errorNum, &
+                  header%error%dummy40
+      read(iunit) header%dummy%headerNum, &
+                  header%dummy%blockLen, &
+                  header%dummy%dummy256
+      npix = header%data%nPix
+      nlin = header%data%nLin
+      ntotal = npix * nlin
+      allocate(idata(ntotal))
 
-  inquire(file=trim(ffname), size=flength)
-  ! Offset relative to the beginning of the file
-  offset = flength - (npix * nlin *2)
-  ! Reposition the file to the offset value for reading
-  call fseek(iunit, offset, 0, rvalue)
-  read(iunit)idata(:)
+      inquire(file=trim(ffname), size=flength)
+      ! Offset relative to the beginning of the file
+      offset = flength - (npix * nlin *2)
+      ! Reposition the file to the offset value for reading
+      call fseek(iunit, offset, 0, rvalue)
+      read(iunit)idata(:)
 
-  startLine = header%segm%startLineNo
-  endLine = startLine + header%data%nLin - 1
-  lon_sat = header%proj%subLon * deg2rad
-  h_sat =  header%proj%satDis * 1000.0
-  r_eq = header%proj%eqtrRadius * 1000.0
-  do jj = 1, header%data%nLin
-     do ii = 1, header%data%nPix
+      startLine = header%segm%startLineNo
+      endLine = startLine + header%data%nLin - 1
+      lon_sat = header%proj%subLon * deg2rad
+      h_sat =  header%proj%satDis * 1000.0
+      r_eq = header%proj%eqtrRadius * 1000.0
+      do jj = 1, header%data%nLin
+         do ii = 1, header%data%nPix
 
-        tbb = missing_r
-        lon = missing_r
-        lat = missing_r
+            tbb = missing_r
+            lon = missing_r
+            lat = missing_r
 
-        ij = ii + (jj-1) * header%data%nPix
-        iline = header%segm%startLineNo + jj - 1
-        ipixel = ii
+            ij = ii + (jj-1) * header%data%nPix
+            iline = header%segm%startLineNo + jj - 1
+            ipixel = ii
 
-        if ( abs(latitude(ipixel, iline)) > 90.0 .or. &
-             abs(longitude(ipixel, iline)) > 360.0 ) then
-           call pixlin_to_lonlat(ipixel, iline, lon, lat, ierr)
-           if ( ierr == 0 ) then
-              valid(ipixel, iline) = .true.
-              latitude(ipixel, iline) = lat
-              longitude(ipixel, iline) = lon
-              call calc_solar_zenith_angle_h( &
-                 latitude(ipixel, iline), &
-                 longitude(ipixel, iline), &
-                 ihh, imm, jday, &
-                 solzen(ipixel, iline))
-              ! calculate geostationary satellite zenith angle
-              rlat = lat * deg2rad ! in radian
-              rlon = lon * deg2rad ! in radian
-              lon_diff = abs(rlon-lon_sat)
-              tmp1 = sqrt((2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
-                     +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2)
-              theta1 = 2.0*asin(tmp1/r_eq/2.)
-              theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
-              satzen(ipixel, iline) = (theta1+theta2) * rad2deg
-              if ( satzen(ipixel, iline) > 65.0 ) then
-                 valid(ipixel, iline) = .false.
-              end if
-           end if
-        end if
+            if ( abs(latitude(ipixel, iline)) > 90.0 .or. &
+                 abs(longitude(ipixel, iline)) > 360.0 ) then
+               call pixlin_to_lonlat(ipixel, iline, lon, lat, ierr)
+               if ( ierr == 0 ) then
+                  valid(ipixel, iline) = .true.
+                  latitude(ipixel, iline) = lat
+                  longitude(ipixel, iline) = lon
+                  call calc_solar_zenith_angle_h( &
+                     latitude(ipixel, iline), &
+                     longitude(ipixel, iline), &
+                     ihh, imm, jday(ifile), &
+                     solzen(ipixel, iline))
+                  ! calculate geostationary satellite zenith angle
+                  rlat = lat * deg2rad ! in radian
+                  rlon = lon * deg2rad ! in radian
+                  lon_diff = abs(rlon-lon_sat)
+                  tmp1 = sqrt((2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
+                         +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2)
+                  theta1 = 2.0*asin(tmp1/r_eq/2.)
+                  theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
+                  satzen(ipixel, iline) = (theta1+theta2) * rad2deg
+                  if ( satzen(ipixel, iline) > 65.0 ) then
+                     valid(ipixel, iline) = .false.
+                  end if
+               end if
+            end if
 
-        radcount = idata(ij)
-        if ( radcount /= header%calib%outCount .and. &
-             radcount /= header%calib%errorCount .and. &
-             radcount > 0 ) then
-           ! convert count value to radiance
-           radiance = radcount * header%calib%gain_cnt2rad + &
-                      header%calib%cnst_cnt2rad
-           radiance = radiance * 1000000.0  ! [ W/(m^2 sr micro m)] => [ W/(m^2 sr m)]
-           ! convert radiance to physical value
-           call hisd_radiance_to_tbb(radiance, tbb)
-           ! visible or near infrared band
-           brit(ipixel, iline) = tbb
-        end if
+            radcount = idata(ij)
+            if ( radcount /= header%calib%outCount .and. &
+                 radcount /= header%calib%errorCount .and. &
+                 radcount > 0 ) then
+               ! convert count value to radiance
+               radiance = radcount * header%calib%gain_cnt2rad + &
+                          header%calib%cnst_cnt2rad
+               radiance = radiance * 1000000.0  ! [ W/(m^2 sr micro m)] => [ W/(m^2 sr m)]
+               ! convert radiance to physical value
+               call hisd_radiance_to_tbb(radiance, tbb)
+               ! visible or near infrared band
+               brit(ipixel, iline, iband) = tbb
+            end if
 
-     end do ! pixel
-  end do ! line
+         end do ! pixel
+      end do ! line
 
-  deallocate(idata)
-  if ( header%obsTime%obsNum > 0 ) then
-     deallocate(header%obsTime%lineNo)
-     deallocate(header%obsTime%obsMJD)
-  end if
-  if ( header%navicorr%correctNum > 0 ) then
-     deallocate(header%navicorr%lineNo)
-     deallocate(header%navicorr%columnShift)
-     deallocate(header%navicorr%lineShift)
-  end if
-  close(iunit)
+      deallocate(idata)
+      if ( header%obsTime%obsNum > 0 ) then
+         deallocate(header%obsTime%lineNo)
+         deallocate(header%obsTime%obsMJD)
+      end if
+      if ( header%navicorr%correctNum > 0 ) then
+         deallocate(header%navicorr%lineNo)
+         deallocate(header%navicorr%columnShift)
+         deallocate(header%navicorr%lineShift)
+      end if
+      close(iunit)
+   end do
+end do
 
-  ! additional info for writing ioda at MPAS mesh !BJJ
-  write(15,*) lon_sat, r_eq, h_sat
+! additional info for writing ioda at MPAS mesh !BJJ
+write(15,*) lon_sat, r_eq, h_sat
 
 end subroutine read_HSD
 
@@ -1042,7 +1076,7 @@ subroutine set_ahi_obserr(name_inst, nchan, obserrors)
    end if
 end subroutine set_ahi_obserr
 
-subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, resolution, jday, is_CLP, is_BCM, is_Phase, is_HT)
+subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, jday, is_CLP, is_BCM, is_Phase, is_HT)
 
    implicit none
 
@@ -1051,14 +1085,14 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
    character(len=3),  intent(out) :: satid
    character(len=22), intent(out) :: file_time
    integer(i_kind),   intent(out) :: iband      ! 7-16
-   character(len=4),  intent(out) :: region     ! 'FLDK'
-   character(len=3),  intent(out) :: resolution ! 'R20, R05, etc'
    integer(i_kind),   intent(out) :: jday
    logical,           intent(out) :: is_CLP
    logical,           intent(out) :: is_BCM
    logical,           intent(out) :: is_HT
    logical,           intent(out) :: is_Phase
 
+   character(len=4)  :: region     ! 'FLDK'
+   character(len=3)  :: resolution ! 'R20, R05, etc'
    integer(i_kind)   :: isegm
    character(len=4)  :: syear
    character(len=2)  :: smonth, sday, shour, sminute, ssec1
@@ -1204,6 +1238,7 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       region = 'FLDK'
       read(fname(10:13), '(a4)')   version
       read(fname(15:17), '(a3)')   satid
+      satid = to_upper(satid)
       read(fname(20:23), '(i4)')   year
       read(fname(20:23), '(a4)')   syear
       read(fname(24:25), '(i2)')   month
@@ -1220,7 +1255,9 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, region, r
       read(fname(34:34), '(a1)')   ssec2
       ! 2017-10-01T18:02:00.0Z
       !print*, syear, smonth, sday, shour, sminute
-      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':'//ssec1//'Z'
+      !file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':'//ssec1//'Z'
+      ! not considering the seconds
+      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
 
       jday = 0
       do i = 1, month - 1

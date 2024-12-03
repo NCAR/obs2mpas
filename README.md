@@ -30,7 +30,7 @@ obs2mpas
 main.F90
    - 0. get argument from command line
    - 1. read namelist
-   - 2. read ABI lat/lon & data
+   - 2. read observations (ABI or AHI) lat/lon & data
    - 3. read MPAS lat/lon
    - 4. build and search kd-tree
    - 5. re-organize the matching pairs

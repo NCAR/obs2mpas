@@ -134,7 +134,7 @@ program  main
    close(unit=nml_unit)
 
 
-   !----- 2. read observations latlon & data ---------------------------------------------
+   !----- 2. read observations (ABI or AHI) latlon & data ---------------------------------------------
    ! read lon / lat / field for satellite
    if ( do_abi ) then
       call Goes_ReBroadcast_converter ( lon_s, lat_s, field_s, varname_s, l_latlon )

@@ -11,7 +11,45 @@ module utils_mod
 
    contains
 
-! Function to convert a string to uppercase
+subroutine interpret_qa_flags(qa_value, clear_flag, cloudy_flag)
+  implicit none
+
+  integer, intent(in)  :: qa_value
+  integer, intent(out) :: clear_flag
+  integer, intent(out) :: cloudy_flag
+
+  integer :: cloud_mask, retrieval_phase
+
+  clear_flag = 0
+  cloudy_flag = 0
+
+  ! extract the cloud mask confidence level (bits 4,3) from qa_value, bits 4,3
+  cloud_mask = mod(shift_right_logical(qa_value, 3), 4)
+
+  ! extract the cloud retrieval phase flag (bits 6,5) from qa_value, bits 6,5
+  retrieval_phase = mod(shift_right_logical(qa_value, 5), 4)
+
+  ! determine if the pixel is confidently clear or confidently cloudy
+  ! Clear pixel (Cloud Mask = 00 and Retrieval Phase = 00)
+  if (cloud_mask == 0 .and. retrieval_phase == 0) then
+     clear_flag = 1  ! Confidently clear
+
+  ! Cloudy pixel (Cloud Mask = 11 and any Retrieval Phase)
+  elseif (cloud_mask == 3) then
+     cloudy_flag = 1  ! Confidently cloudy
+  end if
+
+end subroutine interpret_qa_flags
+
+integer function shift_right_logical(value, n)
+  implicit none
+  integer, intent(in) :: value, n
+
+  ! perform logical right shift
+  shift_right_logical = ishft(value, -n)
+end function shift_right_logical
+
+! convert a string to uppercase
 function to_upper(s)
     character(len=*), intent(in) :: s
     character(len=len(s)) :: to_upper
@@ -25,12 +63,12 @@ function to_upper(s)
     end do
 end function to_upper
 
-! Function to check if a string is empty (contains only spaces)
+! check if a string is empty (contains only spaces)
 logical function is_empty_string(s)
   character(len=*) :: s
   integer :: i
 
-  ! Loop through each character and check if any is non-space
+  ! loop through each character and check if any is non-space
   do i = 1, len(s)
     if (s(i:i) /= ' ') then
        is_empty_string = .false.
@@ -38,7 +76,7 @@ logical function is_empty_string(s)
     end if
   end do
 
-  ! If no non-space characters are found, it is empty
+  ! if no non-space characters are found, it is empty
   is_empty_string = .true.
 end function is_empty_string
 
@@ -158,18 +196,18 @@ subroutine get_date(ccyy, jday, month, day)
    return
 end subroutine get_date
 
-subroutine read_GRB_dims(ncid, xlat, ylon, nx, ny)
+subroutine read_GRB_dims(ncid, xname, yname, nx, ny)
    implicit none
    integer(i_kind),   intent(in) :: ncid
-   character(len=*),  intent(in) :: xlat
-   character(len=*),  intent(in) :: ylon
+   character(len=*),  intent(in) :: xname
+   character(len=*),  intent(in) :: yname
    integer(i_kind),   intent(out):: nx, ny
    integer(i_kind)               :: dimid
    integer(i_kind)               :: nf_status(4)
    continue
-   nf_status(1) = nf_INQ_DIMID(ncid, xlat, dimid)
+   nf_status(1) = nf_INQ_DIMID(ncid, xname, dimid)
    nf_status(2) = nf_INQ_DIMLEN(ncid, dimid, nx)
-   nf_status(3) = nf_INQ_DIMID(ncid, ylon, dimid)
+   nf_status(3) = nf_INQ_DIMID(ncid, yname, dimid)
    nf_status(4) = nf_INQ_DIMLEN(ncid, dimid, ny)
    if ( any(nf_status /= 0) ) then
       write(0,*) 'Error reading dimensions'

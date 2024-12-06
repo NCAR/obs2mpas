@@ -21,8 +21,6 @@ module mod_himawari_ahi
 !          n_subsample = 1,             ! value use for thinning if write_iodav1 = .true.
 !          write_iodav1 = .false.,      ! option to write out an iodav1 file (no superobbing)
 !        /
-!
-! TODO: implement get brigthness temperature directly from NetCDF files (from ftp.ptree.jaxa.jp)
 
   use netcdf_mod, only: open_netcdf_for_write, close_netcdf, &
                         def_netcdf_dims, def_netcdf_var, &
@@ -50,7 +48,7 @@ module mod_himawari_ahi
   integer(i_kind), parameter :: npixel = 5500
   integer(i_kind), parameter :: nline  = 5500
   integer(i_kind), parameter :: nband = 10  ! number of infrared bands
-  integer(i_kind), parameter :: nsegm = 10  ! number of segment
+  integer(i_kind) :: nsegm       ! number of segment
   integer(i_kind)            :: band_start = 7
   integer(i_kind)            :: band_end   = 16
 
@@ -79,9 +77,13 @@ module mod_himawari_ahi
   character(len=22),  allocatable :: scan_time(:) ! 2017-10-01T18:02:19.6Z
   character(len=22), allocatable  :: time_start(:) ! (ntime) 2017-10-01T18:02:19.6Z
   integer(i_kind),    allocatable :: fband_id(:)
+  integer(i_kind),    allocatable :: segm(:)
   integer(i_kind),    allocatable :: ftime_id(:)
   integer(i_kind),    allocatable :: julianday(:)
   logical,            allocatable :: valid(:), is_CLP(:), is_BCM(:), is_HT(:), is_Phase(:)
+  logical,            allocatable :: is_HS_HSD(:), is_HS_NC(:)
+
+  character(len=256), allocatable :: hsfnames(:)
   logical,            allocatable :: fexist(:)
 
   integer(i_kind) :: ncid, nf_status
@@ -92,10 +94,11 @@ module mod_himawari_ahi
   integer(i_kind) :: band_id
 
   logical              :: found_time
-  logical              :: got_hs, got_clp, got_cm, got_ht, got_phase
-  character(len=256)   :: cm_file, ht_file, phase_file
+  logical              :: got_hs, got_nc, got_clp, got_cm, got_ht, got_phase
+  character(len=256)   :: btnc_file, cm_file, ht_file, phase_file
 
   integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
+  real(r_kind),    allocatable :: bt_3d(:,:,:) ! brightness temperature(nband,nx,ny)
 
   type rad_type
      real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
@@ -288,29 +291,23 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    allocate (ftime_id(nfile))
    allocate (scan_time(nfile))
    allocate (fband_id(nfile))
+   allocate (segm(nfile))
    allocate (julianday(nfile))
    allocate (valid(nfile))
-   allocate (fexist(nfile))
    valid(:) = .false.
 
+   allocate (is_HS_HSD(nfile))
+   allocate (is_HS_NC(nfile))
    allocate (is_CLP(nfile))
    allocate (is_BCM(nfile))
    allocate (is_Phase(nfile))
    allocate (is_HT(nfile))
+   is_HS_HSD(:)= .false.
+   is_HS_NC(:) = .false.
    is_CLP(:)   = .false.
    is_BCM(:)   = .false.
    is_Phase(:) = .false.
    is_HT(:)    = .false.
-
-   allocate (got_latlon_out(npixel, nline))
-   allocate (glat_out(npixel, nline))
-   allocate (glon_out(npixel, nline))
-   allocate (gsolzen(npixel, nline))
-   allocate (gsatzen(npixel, nline))
-   glat_out(:,:)  = missing_r
-   glon_out(:,:)  = missing_r
-   gsolzen(:,:)   = missing_r
-   gsatzen(:,:)   = missing_r
 
    ! parse the file list
    t_index = 0
@@ -324,7 +321,8 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
      end if
 
      ! retrieve some basic info from the filename itself
-     call decode_himawari_name(trim(fnames(ifile)), finfo, fband_id(ifile), fsat_id, scan_time(ifile), julianday(ifile), is_CLP(ifile), is_BCM(ifile), is_Phase(ifile), is_HT(ifile))
+     call decode_himawari_name(trim(fnames(ifile)), finfo, fband_id(ifile), segm(ifile), fsat_id, scan_time(ifile), julianday(ifile), is_CLP(ifile), is_BCM(ifile), is_Phase(ifile), is_HT(ifile), is_HS_HSD(ifile), is_HS_NC(ifile))
+
      if ( fsat_id /= sat_id ) then
         cycle file_loop1
      end if
@@ -333,30 +331,35 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
                 .or. is_HT(ifile) ) ) then
         ! id of the file name must match specified data_id in namelist
         if ( finfo /= data_id ) then
-           write(0,*) 'Satellite ID from namelist /= Satellite ID in flist.txt'
+           write(0,*) 'Data ID from namelist /= Data ID in flist.txt'
            cycle file_loop1
         else
            ! only process band 7-16
-           if ( fband_id(ifile) < band_start .or. fband_id(ifile) > band_end ) then
+           if ( fband_id(ifile) == -99 ) then ! means that all bands are in one file
+              continue
+           else if ( fband_id(ifile) < band_start .or. fband_id(ifile) > band_end ) then
               write(0,*) 'Infrared band ', fband_id(ifile), ' NOT supported'
               cycle file_loop1
            end if
         end if
+     end if
+     if ( is_HS_HSD(ifile) ) then
         got_hs = .true.
-     else
-        if ( is_CLP(ifile) ) then
-           got_clp = .true.
-           cm_file = fnames(ifile)
-        else if ( is_BCM(ifile) ) then
-           got_cm = .true.
-           cm_file = fnames(ifile)
-        else if ( is_Phase(ifile) ) then
-           got_phase = .true.
-           phase_file = fnames(ifile)
-        else if ( is_HT(ifile) ) then
-           got_ht = .true.
-           ht_file = fnames(ifile)
-        end if
+     else if ( is_HS_NC(ifile) ) then
+        got_nc = .true.
+        btnc_file = fnames(ifile)
+     else if ( is_CLP(ifile) ) then
+        got_clp = .true.
+        cm_file = fnames(ifile)
+     else if ( is_BCM(ifile) ) then
+        got_cm = .true.
+        cm_file = fnames(ifile)
+     else if ( is_Phase(ifile) ) then
+        got_phase = .true.
+        phase_file = fnames(ifile)
+     else if ( is_HT(ifile) ) then
+        got_ht = .true.
+        ht_file = fnames(ifile)
      end if
 
      valid(ifile) = .true.
@@ -400,20 +403,27 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    allocate (time_start(ntime))
    allocate (rdata(ntime))
 
-   if ( got_clp .or. got_cm ) then
-      allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-      allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-   else
-      allocate (F_out(npixel, nline, nband))
-      allocate (varname_out(nband))
-   end if
-   F_out(:,:,:)   = missing_r
-   varname_out(:) = ''
-
    if ( any(valid) ) then
       if ( got_hs ) then
-         call read_HSD(data_dir, fnames, fsat_id, julianday, glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
-         F_out(1:npixel,1:nline,1:nband) = brit(1:npixel,1:nline,1:nband)
+
+         allocate (got_latlon_out(npixel, nline))
+         allocate (glat_out(npixel, nline))
+         allocate (glon_out(npixel, nline))
+         allocate (gsolzen(npixel, nline))
+         allocate (gsatzen(npixel, nline))
+         glat_out(:,:)  = missing_r
+         glon_out(:,:)  = missing_r
+         gsolzen(:,:)   = missing_r
+         gsatzen(:,:)   = missing_r
+
+         allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+         F_out(:,:,:)   = missing_r
+
+         allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+         varname_out(:) = ''
+
+         nsegm = segm(1)
+         call read_HS_HSD(data_dir, fnames, fsat_id, nsegm, julianday, glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
 
          if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,npixel, nline))
          if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,npixel, nline))
@@ -427,28 +437,94 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
                   rdata(it)%bt(ib, i, j) = brit(i, j, ib)
                   rdata(it)%qf(ib, i, j) = missing_r
                   rdata(it)%sd(ib) = missing_r
+                  F_out(i, j, ib) = brit(i, j, ib)
+
                end do
             end do
             write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib
          end do
+         ! additional info for writing ioda at MPAS mesh !BJJ
          write(15,*) it, scan_time(it), julianday(it)
+
+      else if ( got_nc ) then
+         ffname = trim(data_dir)//'/'//trim(btnc_file)
+         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+         if ( nf_status == 0 ) then
+            write(0,*) 'Reading '//trim(ffname)
+         else
+            write(0,*) 'ERROR reading '//trim(ffname)
+            stop 1
+         end if
+         call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
+         allocate (got_latlon_out(nx, ny))
+         allocate (glat_out(nx, ny))
+         allocate (glon_out(nx, ny))
+         allocate (gsolzen(nx, ny))
+         allocate (gsatzen(nx, ny))
+         glat_out(:,:)  = missing_r
+         glon_out(:,:)  = missing_r
+         gsolzen(:,:)   = missing_r
+         gsatzen(:,:)   = missing_r
+
+         allocate (F_out(nx, ny, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+         F_out(:,:,:)   = missing_r
+
+         allocate (varname_out(nband+1))   !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+         varname_out(:) = ''
+
+         ! get latitude/longitude
+         call read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
+
+         allocate (bt_3d(nx, ny, nband))
+         call read_HS_NC(ncid, nx, ny, nband, bt_3d, gsolzen, gsatzen, time_start(it))
+         F_out(1:nx,1:ny,1:nband) = bt_3d(1:nx,1:ny,1:nband)
+
+         if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,nx, ny))
+         if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,nx, ny))
+         if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband,nx, ny))
+         if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
+
+         do ib = 1, nband
+            do j = 1, ny
+               do i = 1, nx
+                  rdata(it)%rad(ib, i, j) = missing_r
+                  rdata(it)%bt(ib, i, j) = bt_3d(i, j, ib)
+                  rdata(it)%qf(ib, i, j) = missing_r
+                  rdata(it)%sd(ib) = missing_r
+               end do
+            end do
+            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib
+         end do
+         ! additional info for writing ioda at MPAS mesh !BJJ
+         write(15,*) it, scan_time(it), julianday(it)
+         deallocate(bt_3d)
+
+      else
+         write(0,*) 'ERROR: Invalid file for Brightness Temperature data'
+         stop 1
       end if
+
       if ( got_clp ) then
-            ffname = trim(data_dir)//'/'//trim(cm_file)
-            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
-            if ( nf_status == 0 ) then
-               write(0,*) 'Reading '//trim(ffname)
-            else
-               write(0,*) 'ERROR reading '//trim(ffname)
-               stop 1
-            end if
-            call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
-            allocate (cm_2d(nx, ny))
-            call read_CLP(ncid, nx, ny, cm_2d)
-            if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
-            rdata(it)%cm(:,:) = cm_2d(:,:)
-            F_out(:,:,nband+1) = cm_2d(:,:)
-            varname_out(nband+1) = 'BCM_'//fsat_id
+         ffname = trim(data_dir)//'/'//trim(cm_file)
+         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+         if ( nf_status == 0 ) then
+            write(0,*) 'Reading '//trim(ffname)
+         else
+            write(0,*) 'ERROR reading '//trim(ffname)
+            stop 1
+         end if
+         call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
+         allocate (cm_2d(nx, ny))
+         call read_CLP(ncid, nx, ny, cm_2d)
+         if ( .not. got_nc .and. ( nx /= npixel .or. ny /= nline ) ) then
+            write(0,*) 'ERROR: Brightness temperature and cloud '&
+                       'type are at different resolutions. Try another product'
+            stop
+         end if
+         if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+         rdata(it)%cm(:,:) = cm_2d(:,:)
+         F_out(:,:,nband+1) = cm_2d(:,:)
+         varname_out(nband+1) = 'BCM_'//fsat_id
       else
          if ( got_cm ) then
             ffname = trim(data_dir)//'/'//trim(cm_file)
@@ -461,6 +537,11 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
             end if
             call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
             allocate (cm_2d(nx, ny))
+            if ( nx /= npixel .or. ny /= nline ) then
+               write(0,*) 'ERROR: Brightness temperature and cloud '&
+                          'mask are at different resolutions. Try another product'
+               stop
+            end if
             call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
             if ( is_empty_string(time_start(it)) ) then
                continue
@@ -474,7 +555,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
             varname_out(nband+1) = 'BCM_'//fsat_id
 
          else if ( got_ht .or. got_phase ) then
-            write(0,*) 'ERROR: reading these files is NOT implemented YET'
+            write(0,*) 'ERROR: reading HEIGHT and PHASE files is NOT implemented YET'
             stop 1
          end if
       nf_status = nf_CLOSE(ncid)
@@ -507,7 +588,6 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
 
    if ( allocated(gsatzen) ) deallocate(gsatzen)
    if ( allocated(gsolzen) ) deallocate(gsolzen)
-
    do it = 1, ntime
       if ( allocated(rdata(it)%rad) ) deallocate (rdata(it)%rad)
       if ( allocated(rdata(it)%bt)  ) deallocate (rdata(it)%bt)
@@ -521,14 +601,16 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    deallocate(ftime_id)
    deallocate(scan_time)
    deallocate(fband_id)
+   deallocate(segm)
    deallocate(julianday)
    deallocate(valid)
-   deallocate(fexist)
 
    deallocate(is_CLP)
    deallocate(is_BCM)
    deallocate(is_Phase)
    deallocate(is_HT)
+   deallocate(is_HS_HSD)
+   deallocate(is_HS_NC)
 
 end subroutine Himawari_ReBroadcast_converter
 
@@ -536,37 +618,100 @@ subroutine read_CLP(ncid, nx, ny, cm)
    implicit none
    integer(i_kind),   intent(in)    :: ncid
    integer(i_kind),   intent(in)    :: nx, ny
-   integer(i_kind),   intent(inout) :: cm(nx,ny)
+   integer(i_kind),   intent(inout) :: cm(nx, ny)
    integer(i_short),  allocatable   :: itmp_short_2d(:,:)
+   integer(i_short),  allocatable   :: uitmp_short_2d(:,:)
+   integer(i_kind),   allocatable   :: itmp_2d(:,:)
+   integer(i_kind),   allocatable   :: uitmp_2d(:,:)
    integer(i_kind)                  :: nf_status
    integer(i_kind)                  :: istart(2), icount(2)
    integer(i_kind)                  :: varid, i, j
    integer(i_kind)                  :: imiss = -999
-   integer(i_short)                 :: ifill
+   integer(i_short)                 :: cifill = -999
+   integer(i_short)                 :: ifill = -999
+   real(r_single)                   :: scalef, offset
 
-   continue
+   character(len=100)               :: flag_description
+   character(len=256),  allocatable :: flags(:,:)
+   integer :: clear_flag, cloudy_flag
+
+   scalef = 0.01
+   offset = 0.0
 
    istart(1) = 1
    icount(1) = nx
    istart(2) = 1
    icount(2) = ny
-   allocate(itmp_short_2d(nx,ny))
+
+   ! read CLTYPE (cloud type)
    nf_status = nf_INQ_VARID(ncid, 'CLTYPE', varid)
-   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
-   nf_status = nf_GET_ATT_INT2(ncid, varid, '_FillValue',  ifill)
-   cm(:,:) = imiss
+   allocate(itmp_short_2d(nx,ny))
+   if (nf_status /= NF_NOERR) then
+      print *, "Error: Unable to find the variable 'CLTYPE' in NetCDF file"
+      deallocate(itmp_short_2d)
+      return
+   end if
+   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+   nf_status = nf_GET_ATT_INT2(ncid, varid, 'missing_value',  cifill)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+
+   allocate(itmp_2d(nx, ny))
+   itmp_2d = itmp_short_2d
    do j = 1, ny
       do i = 1, nx
-         if ( (itmp_short_2d(i,j) /= ifill) ) then !.or. (itmp_short_2d(i,j) /= 10) ) then
-            if (itmp_short_2d(i,j) == 0 ) then ! clear pixel
-               cm(i,j) = 0
-            else
-               cm(i,j) = 1
+         if (itmp_short_2d(i,j) /= cifill) then
+            itmp_2d(i,j) = offset + itmp_short_2d(i,j) * scalef
+         end if
+      end do
+   end do
+
+   ! read QA (Quality Assurance)
+   nf_status = nf_INQ_VARID(ncid, 'QA', varid)
+   allocate(uitmp_short_2d(nx,ny))
+   if (nf_status /= NF_NOERR) then
+      print *, "Error: Unable to find the variable 'QA' in NetCDF file"
+      deallocate(uitmp_short_2d)
+      return
+   end if
+   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), uitmp_short_2d(:,:))
+   nf_status = nf_GET_ATT_INT2(ncid, varid, 'missing_value',  ifill)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+
+   allocate(uitmp_2d(nx, ny))
+   uitmp_2d = uitmp_short_2d
+   do j = 1, ny
+      do i = 1, nx
+         if (uitmp_short_2d(i,j) /= ifill) then
+            if ( uitmp_short_2d(i,j) .lt. 0_i_short ) then
+               uitmp_2d(i,j) = uitmp_2d(i,j) + 65536
+            end if
+            uitmp_2d(i,j) = offset + uitmp_2d(i,j) * scalef
+         end if
+      end do
+   end do
+   ! uitmp_2d is now a 32-bit integer
+
+   allocate(flags(nx, ny))
+   do j = 1, ny
+      do i = 1, nx
+         if (uitmp_2d(i,j) /= ifill) then
+            call interpret_qa_flags(uitmp_2d(i,j), clear_flag, cloudy_flag)
+
+            if ( clear_flag == 1 .and. itmp_2d(i,j) == 0 ) then
+               cm(i,j) = 0  ! Confidently clear
+            elseif (cloudy_flag == 1 .and. itmp_2d(i,j) /= 0 .and. itmp_2d(i,j) /= cifill) then
+               cm(i,j) = 1  ! Confidently cloudy
             end if
          end if
       end do
    end do
+
    deallocate(itmp_short_2d)
+   deallocate(itmp_2d)
+   deallocate(uitmp_short_2d)
+   deallocate(flags)
 
    return
 end subroutine read_CLP
@@ -624,273 +769,465 @@ subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
    return
 end subroutine read_L2_BCM
 
-subroutine read_HSD(data_dir, hsd_fnames, satid, jday, longitude, latitude, brit, solzen, satzen, valid)
+subroutine read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
+    implicit none
+    integer, intent(in)    :: ncid
+    integer, intent(in)    :: nx, ny
+    real,    intent(inout) :: glon_out(nx, ny)
+    real,    intent(inout) :: glat_out(nx, ny)
+    logical, intent(inout) :: got_latlon_out(nx, ny)
 
-  implicit none
-  character(len=256), intent(in) :: data_dir
-  character(len=256), intent(in) :: hsd_fnames(:)
-  character(len=3),   intent(in) :: satid
-  integer(i_kind),    intent(in) :: jday(:)
-  real(r_single),    intent(out) :: longitude(npixel, nline)
-  real(r_single),    intent(out) :: latitude(npixel, nline)
-  real(r_single),    intent(out) :: brit(npixel, nline, nband)
-  real(r_single),    intent(out) :: solzen(npixel, nline)
-  real(r_single),    intent(out) :: satzen(npixel, nline)
-  logical,           intent(out) :: valid(npixel, nline)
+    real                   :: rfill_lat, rfill_lon
+    real                   :: lat(nx), lon(ny)
+    integer                :: varid, nf_status
+    integer                :: i, j
 
-  integer(i_kind) :: iband, isegm
+    ! get latitude
+    nf_status = nf_INQ_VARID(ncid, 'latitude', varid)
+    if (nf_status /= NF_NOERR) then
+        print *, 'Error: Could not find variable "latitude" in NetCDF file.'
+        stop 1
+    end if
+    nf_status = nf_GET_VAR_REAL(ncid, varid, lat)
+    nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lat)
 
-  integer(i_short), allocatable  :: idata(:)
-  integer(i_kind) :: numCorrect
-  integer(i_kind) :: numObs
-  integer(i_kind) :: ipixel, iline
-  integer(i_kind) :: startLine, endLine
-  integer(i_kind) :: radcount, i, ii, jj, ij, iv
-  integer(i_kind) :: ierr
-  integer(i_kind) :: ihh, imm, flength, rvalue, offset
-  integer(i_kind) :: iunit = 21
-  real(r_double)  :: lon, lat
-  real(r_double)  :: radiance, tbb
-  real(r_double)  :: lon_sat, h_sat, r_eq
-  integer(i_kind) :: nodivisionsegm = 1
-  ! end of declaration
-  continue
+    ! get longitude
+    nf_status = nf_INQ_VARID(ncid, 'longitude', varid)
+    if (nf_status /= NF_NOERR) then
+        print *, 'Error: Could not find variable "longitude" in NetCDF file.'
+        stop 1
+    end if
+    nf_status = nf_GET_VAR_REAL(ncid, varid, lon)
+    nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lon)
 
-  longitude(:,:) = missing_r
-  latitude(:,:)  = missing_r
-  brit(:,:,:)    = missing_r
-  solzen(:,:)    = missing_r
-  satzen(:,:)    = missing_r
-  valid(:,:)     = .false.
+    ! longitudes are 0-360, convert them to -180 to 180
+    do j = 1, ny
+       if (lon(j) > 180.0) then
+           lon(j) = lon(j) - 360.0
+       elseif (lon(j) < -180.0) then
+           lon(j) = lon(j) + 360.0
+       end if
+    end do
 
-do iband = 1, nband
-   do isegm = 1, nsegm
-      ifile = isegm + (iband-1) * nsegm
-      if ( hsd_fnames(ifile)(1:2) /= 'HS' ) cycle
-      ffname = trim(data_dir)//'/'//trim(hsd_fnames(ifile))
-      read(hsd_fnames(ifile)(14:15), '(i2)')   ihh
-      read(hsd_fnames(ifile)(19:20), '(i2)')   imm
-      inquire(file=ffname, exist=fexist(ifile))
-      if (.not. fexist(ifile)) then
-         print *, 'File not found: ', trim(ffname)
-         cycle
-      end if
-      open(iunit, file=trim(ffname), form='unformatted', action='read', access='stream', status='old', convert='little_endian')
-      print*,'Reading from ', trim(ffname)
-
-      read(iunit) header%basic%headerNum, &
-                  header%basic%blockLen, &
-                  header%basic%numHeader, &
-                  header%basic%byteOrder, &
-                  header%basic%satName, &
-                  header%basic%procCenter, &
-                  header%basic%obsArea, &
-                  header%basic%dummy2, &
-                  header%basic%hhnn, &
-                  header%basic%obsStartTime, &
-                  header%basic%obsEndTime, &
-                  header%basic%fileCreateTime, &
-                  header%basic%totalHeaderLen, &
-                  header%basic%dataLen, &
-                  header%basic%qcflag1, &
-                  header%basic%qcflag2, &
-                  header%basic%qcflag3, &
-                  header%basic%qcflag4, &
-                  header%basic%version, &
-                  header%basic%fileName, &
-                  header%basic%dummy40
-      read(iunit) header%data%headerNum, &
-                  header%data%blockLen,&
-                  header%data%bitPix, &
-                  header%data%nPix, &
-                  header%data%nLin, &
-                  header%data%compression, &
-                  header%data%dummy40
-      read(iunit) header%proj%headerNum, &
-                  header%proj%blockLen, &
-                  header%proj%subLon, &
-                  header%proj%cfac, &
-                  header%proj%lfac, &
-                  header%proj%coff, &
-                  header%proj%loff, &
-                  header%proj%satDis, &
-                  header%proj%eqtrRadius, &
-                  header%proj%polrRadius, &
-                  header%proj%projParam1, &
-                  header%proj%projParam2, &
-                  header%proj%projParam3, &
-                  header%proj%projParamSd, &
-                  header%proj%resampleKind, &
-                  header%proj%resampleSize, &
-                  header%proj%dummy40
-      read(iunit) header%navi%headerNum, &
-                  header%navi%blockLen, &
-                  header%navi%navTime, &
-                  header%navi%sspLon, &
-                  header%navi%sspLat, &
-                  header%navi%satDis, &
-                  header%navi%nadirLon, &
-                  header%navi%nadirLat, &
-                  header%navi%sunPos_x, &
-                  header%navi%sunPos_y, &
-                  header%navi%sunPos_z, &
-                  header%navi%moonPos_x, &
-                  header%navi%moonPos_y, &
-                  header%navi%moonPos_z, &
-                  header%navi%dummy40
-      read(iunit) header%calib%headerNum, &
-                  header%calib%blockLen, &
-                  header%calib%bandNo, &
-                  header%calib%waveLen, &
-                  header%calib%bitPix, &
-                  header%calib%errorCount, &
-                  header%calib%outCount, &
-                  header%calib%gain_cnt2rad, &
-                  header%calib%cnst_cnt2rad, &
-                  header%calib%rad2btp_c0, &
-                  header%calib%rad2btp_c1, &
-                  header%calib%rad2btp_c2, &
-                  header%calib%btp2rad_c0, &
-                  header%calib%btp2rad_c1, &
-                  header%calib%btp2rad_c2, &
-                  header%calib%lightSpeed, &
-                  header%calib%planckConst, &
-                  header%calib%bolzConst, &
-                  header%calib%dummy40
-      read(iunit) header%interCalib%headerNum, &
-                  header%interCalib%blockLen, &
-                  header%interCalib%dummy256
-      read(iunit) header%segm%headerNum, &
-                  header%segm%blockLen, &
-                  header%segm%totalSegNum, &
-                  header%segm%segSeqNo, &
-                  header%segm%startLineNo, &
-                  header%segm%dummy40
-      read(iunit) header%navicorr%headerNum, &
-                  header%navicorr%blockLen, &
-                  header%navicorr%RoCenterColumn, &
-                  header%navicorr%RoCenterLine, &
-                  header%navicorr%RoCorrection, &
-                  header%navicorr%correctNum
-      if ( header%navicorr%correctNum > 0 ) then
-         numCorrect = header%navicorr%correctNum
-         allocate(header%navicorr%lineNo(numCorrect))
-         allocate(header%navicorr%columnShift(numCorrect))
-         allocate(header%navicorr%lineShift(numCorrect))
-      end if
-      read(iunit) header%navicorr%lineNo(numCorrect), &
-                  header%navicorr%columnShift(numCorrect), &
-                  header%navicorr%lineShift(numCorrect), &
-                  header%navicorr%dummy40
-      rewind(iunit)
-      read(iunit) header%obstime%headerNum, &
-                  header%obstime%blockLen, &
-                  header%obstime%obsNum
-      if ( header%obsTime%obsNum > 0 ) then
-         numObs = header%obsTime%obsNum
-         allocate(header%obsTime%lineNo(numObs))
-         allocate(header%obsTime%obsMJD(numObs))
-      end if
-      read(iunit) header%obstime%lineNo, &
-                  header%obstime%obsMJD, &
-                  header%obstime%dummy40
-      read(iunit) header%error%headerNum, &
-                  header%error%blockLen, &
-                  header%error%errorNum, &
-                  header%error%dummy40
-      read(iunit) header%dummy%headerNum, &
-                  header%dummy%blockLen, &
-                  header%dummy%dummy256
-      npix = header%data%nPix
-      nlin = header%data%nLin
-      ntotal = npix * nlin
-      allocate(idata(ntotal))
-
-      inquire(file=trim(ffname), size=flength)
-      ! Offset relative to the beginning of the file
-      offset = flength - (npix * nlin *2)
-      ! Reposition the file to the offset value for reading
-      call fseek(iunit, offset, 0, rvalue)
-      read(iunit)idata(:)
-
-      startLine = header%segm%startLineNo
-      endLine = startLine + header%data%nLin - 1
-      lon_sat = header%proj%subLon * deg2rad
-      h_sat =  header%proj%satDis * 1000.0
-      r_eq = header%proj%eqtrRadius * 1000.0
-      do jj = 1, header%data%nLin
-         do ii = 1, header%data%nPix
-
-            tbb = missing_r
-            lon = missing_r
-            lat = missing_r
-
-            ij = ii + (jj-1) * header%data%nPix
-            iline = header%segm%startLineNo + jj - 1
-            ipixel = ii
-
-            if ( abs(latitude(ipixel, iline)) > 90.0 .or. &
-                 abs(longitude(ipixel, iline)) > 360.0 ) then
-               call pixlin_to_lonlat(ipixel, iline, lon, lat, ierr)
-               if ( ierr == 0 ) then
-                  valid(ipixel, iline) = .true.
-                  latitude(ipixel, iline) = lat
-                  longitude(ipixel, iline) = lon
-                  call calc_solar_zenith_angle_h( &
-                     latitude(ipixel, iline), &
-                     longitude(ipixel, iline), &
-                     ihh, imm, jday(ifile), &
-                     solzen(ipixel, iline))
-                  ! calculate geostationary satellite zenith angle
-                  rlat = lat * deg2rad ! in radian
-                  rlon = lon * deg2rad ! in radian
-                  lon_diff = abs(rlon-lon_sat)
-                  tmp1 = sqrt((2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
-                         +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2)
-                  theta1 = 2.0*asin(tmp1/r_eq/2.)
-                  theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
-                  satzen(ipixel, iline) = (theta1+theta2) * rad2deg
-                  if ( satzen(ipixel, iline) > 65.0 ) then
-                     valid(ipixel, iline) = .false.
-                  end if
-               end if
+    got_latlon_out = .true.
+    do j = 1, ny
+        do i = 1, nx
+            if (lat(j) == rfill_lat .or. lon(i) == rfill_lon) then
+                got_latlon_out(i,j) = .false.
+            else
+                glat_out(i,j) = lat(j)
+                glon_out(i,j) = lon(i)
             end if
+        end do
+    end do
 
-            radcount = idata(ij)
-            if ( radcount /= header%calib%outCount .and. &
-                 radcount /= header%calib%errorCount .and. &
-                 radcount > 0 ) then
-               ! convert count value to radiance
-               radiance = radcount * header%calib%gain_cnt2rad + &
-                          header%calib%cnst_cnt2rad
-               radiance = radiance * 1000000.0  ! [ W/(m^2 sr micro m)] => [ W/(m^2 sr m)]
-               ! convert radiance to physical value
-               call hisd_radiance_to_tbb(radiance, tbb)
-               ! visible or near infrared band
-               brit(ipixel, iline, iband) = tbb
+end subroutine read_latlon
+
+subroutine read_HS_NC(ncid, nx, ny, nband, bt, gsolzen, gsatzen, time_start)
+
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny, nband
+   real(r_kind),      intent(inout) :: bt(nx,ny,nband)
+   real(r_kind),      intent(inout) :: gsolzen(nx,ny)
+   real(r_kind),      intent(inout) :: gsatzen(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_1d(:)
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   integer(i_short), allocatable    :: itmp_short_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_short)                 :: ifill = -999
+   real(r_single)                   :: rfill_lat, rfill_lon
+   real(r_single),  allocatable     :: geometry_parameters(:)
+   real(r_kind)                     :: rmiss = -999.0
+   integer(i_kind)                  :: imiss = -999
+   real(r_single)                   :: scalef, offset
+
+   real(r_double)   :: lon_sat, h_sat, r_eq, Rs
+   integer          :: geometry, dimsize, iband
+   character(len=2) :: siband
+
+   scalef = 0.01
+   offset = 0.0
+
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'start_time', time_start)
+
+   ! get geometry parameters
+   nf_status = nf_INQ_VARID(ncid, 'geometry_parameters', varid)
+   nf_status = nf_INQ_VARDIMID(ncid, varid, geometry)
+   nf_status = nf_INQ_DIMLEN(ncid, geometry, dimsize)
+
+   allocate(geometry_parameters(dimsize))
+   nf_status = nf_GET_VAR_REAL(ncid, varid, geometry_parameters)
+
+   lon_sat = geometry_parameters(1) * deg2rad
+   r_eq = geometry_parameters(7)
+   !Rs  : distance from Earth center to satellite= r_eq + satDis (h_sat)
+   Rs = geometry_parameters(6)
+   h_sat = Rs - r_eq
+
+   ! additional info for writing ioda at MPAS mesh !BJJ
+   write(15,*) lon_sat, r_eq, h_sat
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   bt(:,:,:)  = rmiss
+   ! get brightness temperature for each band
+   do iband = 1, nband
+      write(siband, '(i2.2)') iband
+      nf_status = nf_INQ_VARID(ncid, 'tbb_'//siband, varid)
+      if (nf_status /= NF_NOERR) then
+        cycle  ! Skip this band
+      end if
+      allocate(itmp_short_2d(nx, ny))
+      nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+      nf_status = nf_GET_ATT_INT2(ncid, varid, 'missing_value', ifill)
+      nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+      nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+
+      do j = 1, ny
+         do i = 1, nx
+            if ( itmp_short_2d(i,j) /= ifill ) then
+               bt(i,j,iband) = offset + itmp_short_2d(i,j) * scalef
             end if
+         end do
+      end do
+      deallocate(itmp_short_2d)
 
-         end do ! pixel
-      end do ! line
-
-      deallocate(idata)
-      if ( header%obsTime%obsNum > 0 ) then
-         deallocate(header%obsTime%lineNo)
-         deallocate(header%obsTime%obsMJD)
-      end if
-      if ( header%navicorr%correctNum > 0 ) then
-         deallocate(header%navicorr%lineNo)
-         deallocate(header%navicorr%columnShift)
-         deallocate(header%navicorr%lineShift)
-      end if
-      close(iunit)
    end do
-end do
 
-! additional info for writing ioda at MPAS mesh !BJJ
-write(15,*) lon_sat, r_eq, h_sat
+   ! get solar zenith angle (SOZ)
+   nf_status = nf_INQ_VARID(ncid, 'SOZ', varid)
+   if (nf_status /= NF_NOERR) then
+     print *, 'Error: Could not find variable SOZ'
+     stop 1
+   end if
+   allocate(itmp_short_2d(nx, ny))
+   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+   nf_status = nf_GET_ATT_INT2(ncid, varid, 'missing_value', ifill)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
 
-end subroutine read_HSD
+   do j = 1, ny
+      do i = 1, nx
+         if ( itmp_short_2d(i,j) /= ifill ) then
+            gsolzen(i,j) = offset + itmp_short_2d(i,j) * scalef
+         end if
+      end do
+   end do
+   deallocate(itmp_short_2d)
+
+   ! get satellite zenith angle (SAZ)
+   nf_status = nf_INQ_VARID(ncid, 'SAZ', varid)
+   if (nf_status /= NF_NOERR) then
+     print *, 'Error: Could not find variable SAZ'
+     stop 1
+   end if
+   allocate(itmp_short_2d(nx, ny))
+   nf_status = nf_GET_VARA_INT2(ncid, varid, istart(1:2), icount(1:2), itmp_short_2d(:,:))
+   nf_status = nf_GET_ATT_INT2(ncid, varid, 'missing_value', ifill)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'scale_factor', scalef)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, 'add_offset', offset)
+
+   do j = 1, ny
+      do i = 1, nx
+         if ( itmp_short_2d(i,j) /= ifill ) then
+            gsatzen(i,j) = offset + itmp_short_2d(i,j) * scalef
+         end if
+      end do
+   end do
+   deallocate(itmp_short_2d)
+
+end subroutine read_HS_NC
+
+subroutine read_HS_HSD(data_dir, hsd_fnames, satid, nsegm, jday, longitude, latitude, brit, solzen, satzen, valid)
+
+   implicit none
+   character(len=256), intent(in) :: data_dir
+   character(len=256), intent(in) :: hsd_fnames(:)
+   character(len=3),   intent(in) :: satid
+   integer(i_kind),    intent(in) :: nsegm
+   integer(i_kind),    intent(in) :: jday(:)
+   real(r_single),    intent(out) :: longitude(npixel, nline)
+   real(r_single),    intent(out) :: latitude(npixel, nline)
+   real(r_single),    intent(out) :: brit(npixel, nline, nband)
+   real(r_single),    intent(out) :: solzen(npixel, nline)
+   real(r_single),    intent(out) :: satzen(npixel, nline)
+   logical,           intent(out) :: valid(npixel, nline)
+
+   integer(i_kind)  :: iband, isegm
+   character(len=5) :: segment ! S0110, S0210, etc
+   character(len=3) :: band    ! B07 - B16
+
+   integer(i_short), allocatable  :: idata(:)
+   integer(i_kind) :: numCorrect
+   integer(i_kind) :: numObs
+   integer(i_kind) :: ipixel, iline
+   integer(i_kind) :: startLine, endLine
+   integer(i_kind) :: radcount, i, ii, jj, ij, iv
+   integer(i_kind) :: ierr
+   integer(i_kind) :: ihh, imm, flength, rvalue, offset
+   integer(i_kind) :: iunit = 21
+   real(r_double)  :: lon, lat
+   real(r_double)  :: radiance, tbb
+   real(r_double)  :: lon_sat, h_sat, r_eq
+   integer(i_kind) :: nodivisionsegm = 1
+   ! end of declaration
+   continue
+
+   longitude(:,:) = missing_r
+   latitude(:,:)  = missing_r
+   brit(:,:,:)    = missing_r
+   solzen(:,:)    = missing_r
+   satzen(:,:)    = missing_r
+   valid(:,:)     = .false.
+
+   ! construct file names
+   nfile = nband * nsegm
+   allocate (hsfnames(nfile))
+   allocate (fexist(nfile))
+
+   read(hsd_fnames(1)(14:15), '(i2)')   ihh
+   read(hsd_fnames(1)(19:20), '(i2)')   imm
+   do iband = 1, nband
+      do isegm = 1, nsegm
+         ij = isegm + (iband-1) * nsegm
+         write(band, '(a,i2.2)') 'B', iband+6
+         write(segment,'(a,i2.2,i2.2)') 'S', isegm, nsegm
+         hsfnames(ij) = trim(data_dir) // '/' // hsd_fnames(1)(1:20) // '_' // band // '_' // hsd_fnames(1)(26:33) //'_' // segment // '.DAT'
+         inquire(file=hsfnames(ij), exist=fexist(ij))
+      end do
+   end do
+
+   do iband = 1, nband
+      do isegm = 1, nsegm
+         ifile = isegm + (iband-1) * nsegm
+         if ( fexist(ifile) ) then
+            ffname = hsfnames(ifile)
+            open(iunit, file=trim(ffname), form='unformatted', action='read', access='stream', status='old', convert='little_endian')
+            print*,'Reading from ', trim(ffname)
+
+            read(iunit) header%basic%headerNum, &
+                        header%basic%blockLen, &
+                        header%basic%numHeader, &
+                        header%basic%byteOrder, &
+                        header%basic%satName, &
+                        header%basic%procCenter, &
+                        header%basic%obsArea, &
+                        header%basic%dummy2, &
+                        header%basic%hhnn, &
+                        header%basic%obsStartTime, &
+                        header%basic%obsEndTime, &
+                        header%basic%fileCreateTime, &
+                        header%basic%totalHeaderLen, &
+                        header%basic%dataLen, &
+                        header%basic%qcflag1, &
+                        header%basic%qcflag2, &
+                        header%basic%qcflag3, &
+                        header%basic%qcflag4, &
+                        header%basic%version, &
+                        header%basic%fileName, &
+                        header%basic%dummy40
+            read(iunit) header%data%headerNum, &
+                        header%data%blockLen,&
+                        header%data%bitPix, &
+                        header%data%nPix, &
+                        header%data%nLin, &
+                        header%data%compression, &
+                        header%data%dummy40
+            read(iunit) header%proj%headerNum, &
+                        header%proj%blockLen, &
+                        header%proj%subLon, &
+                        header%proj%cfac, &
+                        header%proj%lfac, &
+                        header%proj%coff, &
+                        header%proj%loff, &
+                        header%proj%satDis, &
+                        header%proj%eqtrRadius, &
+                        header%proj%polrRadius, &
+                        header%proj%projParam1, &
+                        header%proj%projParam2, &
+                        header%proj%projParam3, &
+                        header%proj%projParamSd, &
+                        header%proj%resampleKind, &
+                        header%proj%resampleSize, &
+                        header%proj%dummy40
+            read(iunit) header%navi%headerNum, &
+                        header%navi%blockLen, &
+                        header%navi%navTime, &
+                        header%navi%sspLon, &
+                        header%navi%sspLat, &
+                        header%navi%satDis, &
+                        header%navi%nadirLon, &
+                        header%navi%nadirLat, &
+                        header%navi%sunPos_x, &
+                        header%navi%sunPos_y, &
+                        header%navi%sunPos_z, &
+                        header%navi%moonPos_x, &
+                        header%navi%moonPos_y, &
+                        header%navi%moonPos_z, &
+                        header%navi%dummy40
+            read(iunit) header%calib%headerNum, &
+                        header%calib%blockLen, &
+                        header%calib%bandNo, &
+                        header%calib%waveLen, &
+                        header%calib%bitPix, &
+                        header%calib%errorCount, &
+                        header%calib%outCount, &
+                        header%calib%gain_cnt2rad, &
+                        header%calib%cnst_cnt2rad, &
+                        header%calib%rad2btp_c0, &
+                        header%calib%rad2btp_c1, &
+                        header%calib%rad2btp_c2, &
+                        header%calib%btp2rad_c0, &
+                        header%calib%btp2rad_c1, &
+                        header%calib%btp2rad_c2, &
+                        header%calib%lightSpeed, &
+                        header%calib%planckConst, &
+                        header%calib%bolzConst, &
+                        header%calib%dummy40
+            read(iunit) header%interCalib%headerNum, &
+                        header%interCalib%blockLen, &
+                        header%interCalib%dummy256
+            read(iunit) header%segm%headerNum, &
+                        header%segm%blockLen, &
+                        header%segm%totalSegNum, &
+                        header%segm%segSeqNo, &
+                        header%segm%startLineNo, &
+                        header%segm%dummy40
+            read(iunit) header%navicorr%headerNum, &
+                        header%navicorr%blockLen, &
+                        header%navicorr%RoCenterColumn, &
+                        header%navicorr%RoCenterLine, &
+                        header%navicorr%RoCorrection, &
+                        header%navicorr%correctNum
+            if ( header%navicorr%correctNum > 0 ) then
+               numCorrect = header%navicorr%correctNum
+               allocate(header%navicorr%lineNo(numCorrect))
+               allocate(header%navicorr%columnShift(numCorrect))
+               allocate(header%navicorr%lineShift(numCorrect))
+            end if
+            read(iunit) header%navicorr%lineNo(numCorrect), &
+                        header%navicorr%columnShift(numCorrect), &
+                        header%navicorr%lineShift(numCorrect), &
+                        header%navicorr%dummy40
+            rewind(iunit)
+            read(iunit) header%obstime%headerNum, &
+                        header%obstime%blockLen, &
+                        header%obstime%obsNum
+            if ( header%obsTime%obsNum > 0 ) then
+               numObs = header%obsTime%obsNum
+               allocate(header%obsTime%lineNo(numObs))
+               allocate(header%obsTime%obsMJD(numObs))
+            end if
+            read(iunit) header%obstime%lineNo, &
+                        header%obstime%obsMJD, &
+                        header%obstime%dummy40
+            read(iunit) header%error%headerNum, &
+                        header%error%blockLen, &
+                        header%error%errorNum, &
+                        header%error%dummy40
+            read(iunit) header%dummy%headerNum, &
+                        header%dummy%blockLen, &
+                        header%dummy%dummy256
+            npix = header%data%nPix
+            nlin = header%data%nLin
+            ntotal = npix * nlin
+            allocate(idata(ntotal))
+
+            inquire(file=trim(ffname), size=flength)
+            ! Offset relative to the beginning of the file
+            offset = flength - (npix * nlin *2)
+            ! Reposition the file to the offset value for reading
+            call fseek(iunit, offset, 0, rvalue)
+            read(iunit)idata(:)
+
+            startLine = header%segm%startLineNo
+            endLine = startLine + header%data%nLin - 1
+            lon_sat = header%proj%subLon * deg2rad
+            h_sat =  header%proj%satDis * 1000.0
+            r_eq = header%proj%eqtrRadius * 1000.0
+            do jj = 1, header%data%nLin
+               do ii = 1, header%data%nPix
+
+                  tbb = missing_r
+                  lon = missing_r
+                  lat = missing_r
+
+                  ij = ii + (jj-1) * header%data%nPix
+                  iline = header%segm%startLineNo + jj - 1
+                  ipixel = ii
+
+                  if ( abs(latitude(ipixel, iline)) > 90.0 .or. &
+                       abs(longitude(ipixel, iline)) > 360.0 ) then
+                     call pixlin_to_lonlat(ipixel, iline, lon, lat, ierr)
+                     if ( ierr == 0 ) then
+                        valid(ipixel, iline) = .true.
+                        latitude(ipixel, iline) = lat
+                        longitude(ipixel, iline) = lon
+                        call calc_solar_zenith_angle_h( &
+                           latitude(ipixel, iline), &
+                           longitude(ipixel, iline), &
+                           ihh, imm, jday(ifile), &
+                           solzen(ipixel, iline))
+                        ! calculate geostationary satellite zenith angle
+                        rlat = lat * deg2rad ! in radian
+                        rlon = lon * deg2rad ! in radian
+                        lon_diff = abs(rlon-lon_sat)
+                        tmp1 = sqrt((2.0*r_eq*sin(lon_diff/2.)-r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2 &
+                               +(2.0*r_eq*sin(rlat/2.))**2-(r_eq*(1.0-cos(rlat))*sin(lon_diff/2.))**2)
+                        theta1 = 2.0*asin(tmp1/r_eq/2.)
+                        theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
+                        satzen(ipixel, iline) = (theta1+theta2) * rad2deg
+                        if ( satzen(ipixel, iline) > 65.0 ) then
+                           valid(ipixel, iline) = .false.
+                        end if
+                     end if
+                  end if
+
+                  radcount = idata(ij)
+                  if ( radcount /= header%calib%outCount .and. &
+                       radcount /= header%calib%errorCount .and. &
+                       radcount > 0 ) then
+                     ! convert count value to radiance
+                     radiance = radcount * header%calib%gain_cnt2rad + &
+                                header%calib%cnst_cnt2rad
+                     radiance = radiance * 1000000.0  ! [ W/(m^2 sr micro m)] => [ W/(m^2 sr m)]
+                     ! convert radiance to physical value
+                     call hisd_radiance_to_tbb(radiance, tbb)
+                     ! visible or near infrared band
+                     brit(ipixel, iline, iband) = tbb
+                  end if
+
+               end do ! pixel
+            end do ! line
+
+            deallocate(idata)
+            if ( header%obsTime%obsNum > 0 ) then
+               deallocate(header%obsTime%lineNo)
+               deallocate(header%obsTime%obsMJD)
+            end if
+            if ( header%navicorr%correctNum > 0 ) then
+               deallocate(header%navicorr%lineNo)
+               deallocate(header%navicorr%columnShift)
+               deallocate(header%navicorr%lineShift)
+            end if
+            close(iunit)
+         end if
+      end do
+   end do
+
+   deallocate(fexist)
+   deallocate(hsfnames)
+
+   ! additional info for writing ioda at MPAS mesh !BJJ
+   write(15,*) lon_sat, r_eq, h_sat
+
+end subroutine read_HS_HSD
 
 subroutine pixlin_to_lonlat(pix, lin, lon, lat, ierr)
 
@@ -1076,7 +1413,7 @@ subroutine set_ahi_obserr(name_inst, nchan, obserrors)
    end if
 end subroutine set_ahi_obserr
 
-subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, jday, is_CLP, is_BCM, is_Phase, is_HT)
+subroutine decode_himawari_name(fname, finfo, iband, nsegm, satid, file_time, jday, is_CLP, is_BCM, is_Phase, is_HT, is_HS_HSD, is_HS_NC)
 
    implicit none
 
@@ -1085,30 +1422,39 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, jday, is_
    character(len=3),  intent(out) :: satid
    character(len=22), intent(out) :: file_time
    integer(i_kind),   intent(out) :: iband      ! 7-16
+   integer(i_kind),   intent(out) :: nsegm
    integer(i_kind),   intent(out) :: jday
    logical,           intent(out) :: is_CLP
    logical,           intent(out) :: is_BCM
    logical,           intent(out) :: is_HT
    logical,           intent(out) :: is_Phase
+   logical,           intent(out) :: is_HS_HSD
+   logical,           intent(out) :: is_HS_NC
 
    character(len=4)  :: region     ! 'FLDK'
-   character(len=3)  :: resolution ! 'R20, R05, etc'
-   integer(i_kind)   :: isegm
+   character(len=3)  :: resolution ! 'R20, R21, R05, etc'
    character(len=4)  :: syear
    character(len=2)  :: smonth, sday, shour, sminute, ssec1
    character(len=1)  :: ssec2
    character(len=4)  :: version
    character(len=5)  :: pixelnumber, linenumber
-   integer(i_kind)   :: year, month, day, hour, minute, sec, sec1, sec2
+   integer(i_kind)   :: year, month, day, hour, minute, sec, sec1, sec2, isegm
 
    !CLP_id:     NC_H08_20180512_1800_L2CLP010_FLDK.02401_02401.nc
    !BCM_id_old: Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
    !            Himawari8_AHI_2KM_FLDK_2021023_0000_20_CLOUD_MASK_EN.nc
    !BCM_id_new: AHI-CMSK_v1r0_h08_s202103230300208_e202103230300542_c202103231944583.nc
    !            AHI-CMSK_v1r1_h09_s202308161430206_e202308161439400_c202308161452133.nc
+   !BT HSD:     HS_H08_20210123_0000_B07_FLDK_R20_S0110.DAT
+   !BT NC:      NC_H08_20180415_0000_R21_FLDK.02401_02401.nc
 
-   isegm = -99
-   if ( fname(22:26) == CLP_id ) then
+   nsegm = -99
+   if ( fname(1:2) == 'HS' ) then
+      is_HS_HSD = .true.
+   else if ( fname(1:2) == 'NC' .and. fname(22:26) /= CLP_id ) then
+      is_HS_NC = .true.
+      iband  = -99
+   else if ( fname(22:26) == CLP_id ) then
       is_CLP = .true.
       iband  = -99
    else if ( fname(36:45) == BCM_id_old .or. fname( 40:49) == BCM_id_old ) then
@@ -1137,37 +1483,71 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, jday, is_
    end if
 
    if ( .not. ( is_CLP .or. is_BCM .or. is_Phase .or. is_HT ) ) then
-      !HS_H08_20210123_0000_B07_FLDK_R20_S0110.DAT
-      read(fname(1:2),   '(a2)')   finfo
-      read(fname(4:6),   '(a3)')   satid
-      read(fname(8:11),  '(i4)')   year
-      read(fname(8:11),  '(a4)')   syear
-      read(fname(12:13), '(i2)')   month
-      read(fname(12:13), '(a2)')   smonth
-      read(fname(14:15), '(i2)')   day
-      read(fname(14:15), '(a2)')   sday
-      read(fname(17:18), '(i2)')   hour
-      read(fname(17:18), '(a2)')   shour
-      read(fname(19:20), '(i2)')   minute
-      read(fname(19:20), '(a2)')   sminute
-      read(fname(23:24), '(i2)')   iband
-      read(fname(26:29), '(a4)')   region
-      read(fname(31:33), '(a3)')   resolution
-      read(fname(36:37), '(i2)')   isegm
-      ! 2017-10-01T18:02:00.0Z
-      !print*, syear, smonth, sday, shour, sminute
-      file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
+      if ( is_HS_HSD ) then
+         !HS_H08_20210123_0000_B07_FLDK_R20_S0110.DAT
+         read(fname(1:2),   '(a2)')   finfo
+         read(fname(4:6),   '(a3)')   satid
+         read(fname(8:11),  '(i4)')   year
+         read(fname(8:11),  '(a4)')   syear
+         read(fname(12:13), '(i2)')   month
+         read(fname(12:13), '(a2)')   smonth
+         read(fname(14:15), '(i2)')   day
+         read(fname(14:15), '(a2)')   sday
+         read(fname(17:18), '(i2)')   hour
+         read(fname(17:18), '(a2)')   shour
+         read(fname(19:20), '(i2)')   minute
+         read(fname(19:20), '(a2)')   sminute
+         read(fname(23:24), '(i2)')   iband
+         read(fname(26:29), '(a4)')   region
+         read(fname(31:33), '(a3)')   resolution
+         read(fname(36:37), '(i2)')   isegm
+         read(fname(38:39), '(i2)')   nsegm
+         ! 2017-10-01T18:02:00.0Z
+         !print*, syear, smonth, sday, shour, sminute
+         file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
 
-      jday = 0
-      do i = 1, month - 1
-        jday = jday + mmday(i)
-      end do
-      jday = jday + day
+         jday = 0
+         do i = 1, month - 1
+           jday = jday + mmday(i)
+         end do
+         jday = jday + day
+      else if ( is_HS_NC ) then
+         !NC_H08_20180418_0000_R21_FLDK.02401_02401.nc
+         read(fname(1:2),   '(a2)')   finfo
+         read(fname(4:6),   '(a3)')   satid
+         read(fname(8:11),  '(i4)')   year
+         read(fname(8:11),  '(a4)')   syear
+         read(fname(12:13), '(i2)')   month
+         read(fname(12:13), '(a2)')   smonth
+         read(fname(14:15), '(i2)')   day
+         read(fname(14:15), '(a2)')   sday
+         read(fname(17:18), '(i2)')   hour
+         read(fname(17:18), '(a2)')   shour
+         read(fname(19:20), '(i2)')   minute
+         read(fname(19:20), '(a2)')   sminute
+         read(fname(22:24), '(a3)')   resolution
+         read(fname(26:29), '(a4)')   region
+         read(fname(31:35), '(a5)')   pixelnumber
+         read(fname(37:41), '(a5)')   linenumber
+         ! 2017-10-01T18:02:00.0Z
+         !print*, syear, smonth, sday, shour, sminute
+         file_time = syear//'-'//smonth//'-'//sday//'T'//shour//':'//sminute//':00.0Z'
+
+         jday = 0
+         do i = 1, month - 1
+           jday = jday + mmday(i)
+         end do
+         jday = jday + day
+
+      else
+         write(0,*) 'Error decoding brightness temperature. Provide a valid file'
+         stop
+      end if
 
    else if ( is_CLP ) then
       !NC_H08_20180512_1800_L2CLP010_FLDK.02401_02401.nc
-      finfo = 'HS'
-      resolution = 'R50'
+      resolution = 'R21'
+      read(fname(1:2),   '(a2)')   finfo
       read(fname(4:6),   '(a3)')   satid
       read(fname(8:11),  '(i4)')   year
       read(fname(8:11),  '(a4)')   syear
@@ -1211,7 +1591,7 @@ subroutine decode_himawari_name(fname, finfo, iband, satid, file_time, jday, is_
       else
          ! from 11 Dec 2019 to 1600Z 2 July 2020
          !Himawari8_AHI_FLDK_2019345_0000_00_CLOUD_MASK_EN.nc
-         resolution = 'R50'
+         resolution = 'R20'
          satid = 'H08'
          read(fname(15:18), '(a4)')   region
          read(fname(20:23), '(i4)')   year

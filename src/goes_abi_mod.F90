@@ -262,7 +262,7 @@ subroutine Goes_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out, go
             allocate (rad_2d(nx, ny))
             allocate (bt_2d(nx, ny))
             allocate (qf_2d(nx, ny))
-            allocate (cm_2d(nx, ny))   
+            allocate (cm_2d(nx, ny))
          end if
 
          it = ftime_id(ifile)
@@ -399,7 +399,6 @@ subroutine Goes_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out, go
       end do
    end if
 
-   
    if ( allocated(glat) )   deallocate(glat)
    if ( allocated(glon) )   deallocate(glon)
    if ( allocated(gzen) )   deallocate(gzen)

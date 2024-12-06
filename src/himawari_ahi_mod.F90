@@ -19,6 +19,8 @@ module mod_himawari_ahi
 !        only the 00 minutes, not 00 and 10 minutes). More than one time can be done by executing 
 !        obs2model using different files specification in flist.txt
 !
+! TODO: Implement converting HEIGHT and PHASE files. Need to get the right lat/lon for these files
+!
 ! input files:
 !    (2) namelist.obs2model
 !        &data_nml

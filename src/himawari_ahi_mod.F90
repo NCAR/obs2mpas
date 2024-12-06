@@ -6,10 +6,18 @@
 module mod_himawari_ahi
 !
 ! Purpose:
-!     1. Get Himawari Standard Data (HSD) lat, lon, bt, etc and pass it back to main
-!        Convert HSD files to ioda-v1 format.
-!        Currently only processes bands 7-16.
+!     1. Get Himawari (8 and 9) lat, lon, and bt, and pass it back to main.
+!        Capabilities:
+!        - Convert Himawari Standard Data (HSD) files to ioda-v1 format. Works for 1 to nsegm files
+!        - Convert Himawari NetCDF files to ioda-v1 format.
 !     2. Get Himawari cloud mask or cloud type NetCDF data and add it to the data structure
+!
+! Caveats:
+!     1. Currently only processes bands 7-16. These bands files need to be provided in flist.txt
+!        unless the netcdf files are used (containing all bands)
+!     2. Does not work for more than one file time at the same time (meaning aggregating times from
+!        only the 00 minutes, not 00 and 10 minutes). More than one time can be done by executing 
+!        obs2model using different files specification in flist.txt
 !
 ! input files:
 !    (2) namelist.obs2model

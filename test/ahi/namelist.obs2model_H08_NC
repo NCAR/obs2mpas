@@ -1,10 +1,10 @@
 &data_nml
   list_files = './flist.txt',
-  data_dir = '/glade/campaign/mmm/parc/ivette/pandac/Observations/ahi/test_data_obs2model/H08/2023012300_isegm',   ! path of the HSD files
-  data_id = 'HS', ! prefix of the downloaded HSD files
+  data_dir = '/glade/campaign/mmm/parc/ivette/pandac/Observations/ahi/netcdf_ahi/2018041500',   ! path of the Himawari files
+  data_id = 'NC', ! prefix of the downloaded Himawari files
   sat_id = 'H08',
   n_subsample = 1,
-  write_iodav1 = .true.,
+  write_iodav1 = .false.,
 /
 
 &main_nml

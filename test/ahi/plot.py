@@ -26,18 +26,12 @@ def main():
 
 def scatter(lon,lat,data,title,colormap,savename):
     proj = ccrs.PlateCarree(central_longitude=180)
-    lon = (lon + 180) % 360 - 180
-    #extent = [-140,-10,-65,65]
     extent = [-180,180,-90,90]
     fig = plt.figure(figsize=(8,8))
     ax = plt.axes(projection=proj)
     background(ax, extent)
-    if colormap == 'Greys':
-       vmin = 0
-       vmax = 1
-    else:
-       vmin = np.nanmin(data)
-       vmax = np.nanmax(data)
+    vmin = np.nanmin(data)
+    vmax = np.nanmax(data)
     cmap = colormap
 
     cntr = ax.scatter(lon,lat, c=data, s=0.5, vmin=vmin, vmax=vmax, cmap=cmap, transform=ccrs.PlateCarree())

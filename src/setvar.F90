@@ -21,6 +21,10 @@ module control_para
    implicit none
    save
 
+   real,    parameter :: missing_r = -999.0
+   integer, parameter :: missing_i = -999
+   integer, parameter :: nstring = 50
+
    real*8, parameter :: pi      = dacos(-1.d0)
    real*8, parameter :: deg2rad = pi/180.0d0
    real*8, parameter :: rad2deg = 180.0d0/pi
@@ -36,5 +40,9 @@ module control_para
    integer, parameter  :: i_kind   = i_long                 ! default integer
    integer, parameter  :: r_kind   = r_single               ! default real
 !BJJ   integer, parameter  :: r_kind   = r_double               ! default real
+
+   integer, parameter, private :: llong_t = selected_int_kind(16)     ! llong integer
+   integer, parameter, public  :: i_llong = max( llong_t, i_long )
+
 
 end module control_para

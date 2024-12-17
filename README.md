@@ -11,7 +11,7 @@ Aim
 - Interpolate fields from obs to model
 
 
-To build and run
+To build and run (with default option)
 ----------------
 ```
 source mpas-jedi environment
@@ -19,22 +19,24 @@ git clone https://github.com/byoung-joo/obs2model.git
 cd obs2model
 mkdir build; cd build
 cmake ../ ; make -j4
-cd ../test_abi_read
-./goes2mpas.x
+cd ../test/abi
+ln ../../build/bin/obs2mpas.x .
+./obs2mpas.x
 ```
 
-goes2mpas
+obs2mpas
 ---------
 ```
 main.F90
-   - 0. read namelist
-   - 1. read ABI lat/lon & data
-   - 2. read MPAS lat/lon
-   - 3. build and search kd-tree
-   - 4. re-organize the matching pairs
-   - 5. interpolate the obs fields into model mesh either superob or nearest neighbor.
-   - 6a. Write the interpolated fields to MPAS file
-   - 6b. Write the interpolated fields to IODA file
+   - 0. get argument from command line
+   - 1. read namelist
+   - 2. read observations (ABI or AHI) lat/lon & data
+   - 3. read MPAS lat/lon
+   - 4. build and search kd-tree
+   - 5. re-organize the matching pairs
+   - 6. interpolate the obs fields into model mesh either superob or nearest neighbor.
+   - 7a. Write the interpolated fields to MPAS file
+   - 7b. Write the interpolated fields to IODA file
 ```
 
 namelist.obs2model

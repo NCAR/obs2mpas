@@ -13,6 +13,7 @@ include( ecbuild_system NO_POLICY_SCOPE )
 ecbuild_declare_project()
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 set( CMAKE_DIRECTORY_LABELS ${PROJECT_NAME} )
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 ## Configuration options
 #include( ${PROJECT_NAME}_compiler_flags )
@@ -34,7 +35,7 @@ endif()
 
 find_package(NetCDF REQUIRED COMPONENTS Fortran C)
 
-add_subdirectory( goes2mpas )
+add_subdirectory( src )
 
 ## Package Config
 ecbuild_install_project( NAME ${PROJECT_NAME} )

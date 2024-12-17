@@ -9,8 +9,10 @@ program  main
    use kinds, only : sp, dp
    use control_para, only : tval, pi, rad2deg, deg2rad
    use atlas_module, only: atlas_geometry, atlas_indexkdtree
-   use mod_goes_abi, only: Goes_ReBroadcast_converter, calc_geostationary_satellite_zenith_angle, &
-                           calc_solar_zenith_angle, output_iodav1_o2m
+   use mod_goes_abi, only: Goes_ReBroadcast_converter
+   use mod_himawari_ahi, only: Himawari_ReBroadcast_converter
+   use utils_mod, only: calc_geostationary_satellite_zenith_angle, &
+                        calc_solar_zenith_angle, output_iodav1_o2m
    use mod_read_write_mpas, only: read_mpas_latlon, write_to_mpas
    use mod_read_write_indx, only: read_indx, write_indx
 
@@ -66,6 +68,10 @@ program  main
    logical, allocatable :: l_got_latlon(:)
    real(sp), allocatable :: solzen(:)
 
+   integer             :: narg, iarg, pos
+   character(len=512)  :: strtmp
+   logical             :: do_abi, do_ahi
+   character(len=3)    :: sensor
 
    !BJJ namelist for nml_main
    character(len=256)  :: f_mpas_latlon
@@ -81,13 +87,39 @@ program  main
    call date_and_time(VALUES=tval)
    write (6, 777) 'Date-time: ',tval(1),'-',tval(2),'-',tval(3),tval(5),':',tval(6),':',tval(7)
 
+   !----- 0. get argument from command line
+   do_abi = .true.
+   do_ahi = .false.
+   sensor = 'ABI'
+   narg = command_argument_count()
+   if ( narg > 0 ) then
+      do iarg = 1, narg
+         call get_command_argument(number=iarg, value=strtmp)
+         pos = index(trim(adjustl(strtmp)), 'namelist')
+         if (pos == 0) then
+            if ( trim(strtmp) == '-abi' ) then
+               do_abi = .true.
+               sensor = 'ABI'
+            else if ( trim(strtmp) == '-ahi' ) then
+               do_abi = .false.
+               do_ahi = .true.
+               sensor = 'AHI'
+            else
+               write(*,*) 'Error: observation type not supported'
+               stop 1  ! Exit the program with an error code
+            end if
+         end if
+      end do
+   else
+      write(*,*) 'Using default value observation type: ABI'
+   end if
 
-   !----- 0. read namelist ------------------------------------------------------
+   !----- 1. read namelist ------------------------------------------------------
    ! initialize namelist variables
    f_mpas_latlon = './x1.655362.init.nc' ! MPAS file path/name to read lat & lon information
-   f_mpas_out    = './x1.655362.init.nc' ! MPAS file for writing the interpolated ABI fields
-   l_read_indx   = .false.  ! read index and counnt for matching ABI-MPAS pairs
-   l_write_indx  = .false.  ! write index and counnt for matching ABI-MPAS pairs
+   f_mpas_out    = './newfile.nc'        ! MPAS file for writing the interpolated obs fields
+   l_read_indx   = .false.  ! read index and count for matching obs-MPAS pairs
+   l_write_indx  = .false.  ! write index and count for matching obs-MPAS pairs
    l_superob     = .false.  ! .true.= mesh-based superob, .false.= nearest-neighbor
    l_write_o2m_iodav1 = .false. ! .true.= write superob/neqrest-neighbor into ioda v1 file
 
@@ -102,16 +134,23 @@ program  main
    close(unit=nml_unit)
 
 
-   !----- 1. read ABI latlon & data ---------------------------------------------
-   ! read lon / lat / field for satellite     
-   call Goes_ReBroadcast_converter ( lon_s, lat_s, field_s, varname_s, l_latlon )
+   !----- 2. read observations (ABI or AHI) latlon & data ---------------------------------------------
+   ! read lon / lat / field for satellite
+   if ( do_abi ) then
+      call Goes_ReBroadcast_converter ( lon_s, lat_s, field_s, varname_s, l_latlon )
+   else if ( do_ahi ) then
+      call Himawari_ReBroadcast_converter ( lon_s, lat_s, field_s, varname_s, l_latlon )
+   else
+      write(*,*) 'Error: observation type not supported'
+      stop
+   end if
    nx     = size(field_s, dim=1)
    ny     = size(field_s, dim=2)
    nfield = size(field_s, dim=3)
    write(6,*) 'BJJ, nx, ny, nfield =', nx, ny, nfield
    nS= nx*ny   ! pts from satellite
    call date_and_time(VALUES=tval)
-   write (6, 777) 'GOES READ DONE: ',tval(1),'-',tval(2),'-',tval(3),tval(5),':',tval(6),':',tval(7)
+   write (6, 777) sensor//' READ DONE: ',tval(1),'-',tval(2),'-',tval(3),tval(5),':',tval(6),':',tval(7)
 
    ! count the valid point
    icnt=0
@@ -143,7 +182,7 @@ program  main
    if(icnt .ne. nS_valid) STOP 777 ! sanity check
 
 
-   !----- 2. read MPAS lat/lon --------------------------------------------------
+   !----- 3. read MPAS lat/lon --------------------------------------------------
    ! read lon / lat from MPAS file
    call read_mpas_latlon (f_mpas_latlon, nC, lon_mpas, lat_mpas, bdymask_mpas)  ! unit [radian], single precision
    lon_mpas_dp=lon_mpas ! pass double precision for kd-tree
@@ -164,7 +203,7 @@ program  main
    end if
 
 
-   !----- 3. build and search kd-tree -------------------------------------------
+   !----- 4. build and search kd-tree -------------------------------------------
    ! buid kd-tree
    nn=1  ! number of nearest points !BJJ set "1". No need to be "3"
    allocate (interp_indx(nn, nS_valid))
@@ -202,7 +241,7 @@ program  main
          !print for quick verif.
          if(mod(iS,int(nS_valid/10)).eq.0) then
             write(6,*) 'iS, interp_indx(1:nn,iS)', iS, interp_indx(1:nn,iS)
-            write(6,*) 'ABI : lon, lat = ', lon_s_valid(iS), lat_s_valid(iS)
+            write(6,*) sensor//' : lon, lat = ', lon_s_valid(iS), lat_s_valid(iS)
             do i=1, nn
                ix=interp_indx(i,iS)
                write(6,*) 'MPAS :ith nn, ix,  lon, lat', i, ix, &
@@ -242,7 +281,7 @@ program  main
    max_pair=maxval(cnt_match)
 
 
-   !----- 4. re-organize the matching pairs -------------------------------------
+   !----- 5. re-organize the matching pairs -------------------------------------
    ! distribute the matched pairs (re-organize)
    allocate(lon_s_dist(max_pair,nC))
    allocate(lat_s_dist(max_pair,nC))
@@ -274,7 +313,7 @@ program  main
    deallocate(interp_indx)
 
 
-   !----- 5. interpolate the obs fields into model mesh either superob or nearest neighbor.
+   !----- 6. interpolate the obs fields into model mesh either superob or nearest neighbor.
    ! allocate and initialize the field_mpas
    allocate( field_mpas(nC,nfield) )
    allocate( field_mpas_std(nC,nfield) )
@@ -346,14 +385,14 @@ program  main
    deallocate(field_s_dist)
 
 
-   !----- 6a. Write the interpolated fields to MPAS file--------------------------
+   !----- 7a. Write the interpolated fields to MPAS file--------------------------
    if ( .not. l_write_o2m_iodav1 ) then
       ! write to the existing MPAS file.
-      call write_to_mpas (f_mpas_out, nC, nfield, field_mpas, varname_s)
+      call write_to_mpas (f_mpas_out, nC, nfield, field_mpas, varname_s, sensor)
       call date_and_time(VALUES=tval)
       write (6, 777) 'write_to_mpas done:',tval(1),'-',tval(2),'-',tval(3),tval(5),':',tval(6),':',tval(7)
 
-   !----- 6b. Write the interpolated fields to IODA file--------------------------
+   !----- 7b. Write the interpolated fields to IODA file--------------------------
    else ! l_write_o2m_iodav1 .eq. .true.
 
       rewind(15)

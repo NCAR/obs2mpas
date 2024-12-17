@@ -1,16 +1,11 @@
 module netcdf_mod
 
   use netcdf
+  use control_para
 
   implicit none
 
   private
-
-  real,    parameter :: missing_r = -999.0
-  integer, parameter :: missing_i = -999
-  integer, parameter :: nstring = 50
-  public :: missing_r
-  public :: missing_i
 
   ! public subroutines
   public :: open_netcdf, close_netcdf, get_netcdf_dims, get_netcdf_var_1d

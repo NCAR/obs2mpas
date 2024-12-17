@@ -20,7 +20,7 @@ cd obs2model
 mkdir build; cd build
 cmake ../ ; make -j4
 cd ../test/abi
-ln ../../build/obs2mpas.x .
+ln ../../build/bin/obs2mpas.x .
 ./obs2mpas.x
 ```
 

@@ -434,6 +434,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
 
          nsegm = segm(1)
          call read_HS_HSD(data_dir, fnames, fsat_id, nsegm, julianday, glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
+         F_out(1:npixel,1:nline,1:nband) = brit(1:npixel,1:nline,1:nband)
 
          if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,npixel, nline))
          if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,npixel, nline))
@@ -447,11 +448,9 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
                   rdata(it)%bt(ib, i, j) = brit(i, j, ib)
                   rdata(it)%qf(ib, i, j) = missing_r
                   rdata(it)%sd(ib) = missing_r
-                  F_out(i, j, ib) = brit(i, j, ib)
-
                end do
             end do
-            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib
+            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib+6
          end do
          ! additional info for writing ioda at MPAS mesh !BJJ
          write(15,*) it, scan_time(it), julianday(it)
@@ -503,7 +502,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
                   rdata(it)%sd(ib) = missing_r
                end do
             end do
-            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib
+            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib+6
          end do
          ! additional info for writing ioda at MPAS mesh !BJJ
          write(15,*) it, scan_time(it), julianday(it)
@@ -1003,19 +1002,14 @@ subroutine read_HS_HSD(data_dir, hsd_fnames, satid, nsegm, jday, longitude, lati
 
    read(hsd_fnames(1)(14:15), '(i2)')   ihh
    read(hsd_fnames(1)(19:20), '(i2)')   imm
-   do iband = 1, nband
-      do isegm = 1, nsegm
-         ij = isegm + (iband-1) * nsegm
-         write(band, '(a,i2.2)') 'B', iband+6
-         write(segment,'(a,i2.2,i2.2)') 'S', isegm, nsegm
-         hsfnames(ij) = trim(data_dir) // '/' // hsd_fnames(1)(1:20) // '_' // band // '_' // hsd_fnames(1)(26:33) //'_' // segment // '.DAT'
-         inquire(file=hsfnames(ij), exist=fexist(ij))
-      end do
-   end do
 
    do iband = 1, nband
       do isegm = 1, nsegm
          ifile = isegm + (iband-1) * nsegm
+         write(band, '(a,i2.2)') 'B', iband+6
+         write(segment,'(a,i2.2,i2.2)') 'S', isegm, nsegm
+         hsfnames(ifile) = trim(data_dir) // '/' // hsd_fnames(1)(1:20) // '_' // band // '_' // hsd_fnames(1)(26:33) //'_' // segment // '.DAT'
+         inquire(file=hsfnames(ifile), exist=fexist(ifile))
          if ( fexist(ifile) ) then
             ffname = hsfnames(ifile)
             open(iunit, file=trim(ffname), form='unformatted', action='read', access='stream', status='old', convert='little_endian')

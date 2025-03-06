@@ -10,8 +10,8 @@ module mod_himawari_ahi
 !        Capabilities:
 !        - Convert Himawari Standard Data (HSD) files to ioda-v1 format. Works for 1 to nsegm files
 !        - Convert Himawari NetCDF files to ioda-v1 format.
-!     2. Get Himawari cloud mask or cloud type NetCDF data and add it to the data structure
-!
+ !     2. Get Himawari L2 products of cloud mask (CMSK), cloud height (CHGT) and cloud phase (CPHS) NetCDF data and add it to the data structure
+ !
 ! Caveats:
 !     1. Currently only processes bands 7-16. These bands files need to be provided in flist.txt
 !        unless the netcdf files are used (containing all bands)
@@ -19,7 +19,6 @@ module mod_himawari_ahi
 !        only the 00 minutes, not 00 and 10 minutes). More than one time can be done by executing 
 !        obs2model using different files specification in flist.txt
 !
-! TODO: Implement converting HEIGHT and PHASE files. Need to get the right lat/lon for these files
 !
 ! input files:
 !    (2) namelist.obs2model
@@ -31,6 +30,8 @@ module mod_himawari_ahi
 !          n_subsample = 1,             ! value use for thinning if write_iodav1 = .true.
 !          write_iodav1 = .false.,      ! option to write out an iodav1 file (no superobbing)
 !        /
+!
+! TODO: implement get brigthness temperature directly from NetCDF files (from ftp.ptree.jaxa.jp)
 
   use netcdf_mod, only: open_netcdf_for_write, close_netcdf, &
                         def_netcdf_dims, def_netcdf_var, &
@@ -91,11 +92,10 @@ module mod_himawari_ahi
   integer(i_kind),    allocatable :: ftime_id(:)
   integer(i_kind),    allocatable :: julianday(:)
   logical,            allocatable :: valid(:), is_CLP(:), is_BCM(:), is_HT(:), is_Phase(:)
-  logical,            allocatable :: is_HS_HSD(:), is_HS_NC(:)
-
-  character(len=256), allocatable :: hsfnames(:)
   logical,            allocatable :: fexist(:)
-
+  logical,            allocatable :: is_HS_HSD(:), is_HS_NC(:)
+  
+  character(len=256), allocatable :: hsfnames(:)
   integer(i_kind) :: ncid, nf_status
   integer(i_kind) :: nx, ny
   integer(i_kind) :: it, ib, ii, i, j
@@ -108,7 +108,10 @@ module mod_himawari_ahi
   character(len=256)   :: btnc_file, cm_file, ht_file, phase_file
 
   integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
-  real(r_kind),    allocatable :: bt_3d(:,:,:) ! brightness temperature(nband,nx,ny)
+  integer(i_kind), allocatable :: ctph_2d(:,:)   ! cloud phase
+  real(r_kind),    allocatable :: ctt_2d(:,:) !cloud top temperature  
+  real(r_kind),    allocatable :: bt_3d(:,:,:) ! brightness temperature(nband,nx,ny)  
+
 
   type rad_type
      real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
@@ -319,6 +322,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    is_Phase(:) = .false.
    is_HT(:)    = .false.
 
+
    ! parse the file list
    t_index = 0
    file_loop1: do ifile = 1, nfile
@@ -331,8 +335,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
      end if
 
      ! retrieve some basic info from the filename itself
-     call decode_himawari_name(trim(fnames(ifile)), finfo, fband_id(ifile), segm(ifile), fsat_id, scan_time(ifile), julianday(ifile), is_CLP(ifile), is_BCM(ifile), is_Phase(ifile), is_HT(ifile), is_HS_HSD(ifile), is_HS_NC(ifile))
-
+   call decode_himawari_name(trim(fnames(ifile)), finfo, fband_id(ifile), segm(ifile), fsat_id, scan_time(ifile), julianday(ifile), is_CLP(ifile), is_BCM(ifile), is_Phase(ifile), is_HT(ifile), is_HS_HSD(ifile), is_HS_NC(ifile))
      if ( fsat_id /= sat_id ) then
         cycle file_loop1
      end if
@@ -413,6 +416,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    allocate (time_start(ntime))
    allocate (rdata(ntime))
 
+
    if ( any(valid) ) then
       if ( got_hs ) then
 
@@ -426,11 +430,19 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
          gsolzen(:,:)   = missing_r
          gsatzen(:,:)   = missing_r
 
-         allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         F_out(:,:,:)   = missing_r
-
-         allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         varname_out(:) = ''
+         if ( got_cm .and. got_phase .and. got_ht ) then
+ 
+            write(0,*) 'allocate (F_out(npixel, nline, nband+3))'
+            allocate (F_out(npixel, nline, nband+3)) 
+            allocate (varname_out(nband+3))   
+            F_out(:,:,:)   = missing_r
+            varname_out(:) = ''		 
+         else
+            allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            F_out(:,:,:)   = missing_r
+            allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            varname_out(:) = ''   
+         end if
 
          nsegm = segm(1)
          call read_HS_HSD(data_dir, fnames, fsat_id, nsegm, julianday, glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
@@ -475,11 +487,19 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
          gsolzen(:,:)   = missing_r
          gsatzen(:,:)   = missing_r
 
-         allocate (F_out(nx, ny, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         F_out(:,:,:)   = missing_r
-
-         allocate (varname_out(nband+1))   !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         varname_out(:) = ''
+         if ( got_cm .and. got_phase .and. got_ht ) then
+ 
+            write(0,*) 'allocate (F_out(npixel, nline, nband+3))'
+            allocate (F_out(npixel, nline, nband+3)) 
+            allocate (varname_out(nband+3))   
+            F_out(:,:,:)   = missing_r
+            varname_out(:) = ''		 
+         else
+            allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            F_out(:,:,:)   = missing_r
+            allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            varname_out(:) = ''   
+         end if
 
          ! get latitude/longitude
          call read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
@@ -513,29 +533,30 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
          stop 1
       end if
 
-      if ( got_clp ) then
-         ffname = trim(data_dir)//'/'//trim(cm_file)
-         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
-         if ( nf_status == 0 ) then
-            write(0,*) 'Reading '//trim(ffname)
-         else
-            write(0,*) 'ERROR reading '//trim(ffname)
-            stop 1
-         end if
-         call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
-         allocate (cm_2d(nx, ny))
-         call read_CLP(ncid, nx, ny, cm_2d)
-         if ( .not. got_nc .and. ( nx /= npixel .or. ny /= nline ) ) then
-            write(0,*) 'ERROR: Brightness temperature and cloud '&
+
+     if ( got_clp ) then
+            ffname = trim(data_dir)//'/'//trim(cm_file)
+            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+            if ( nf_status == 0 ) then
+               write(0,*) 'Reading '//trim(ffname)
+            else
+               write(0,*) 'ERROR reading '//trim(ffname)
+               stop 1
+            end if
+            call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
+            allocate (cm_2d(nx, ny))
+            call read_CLP(ncid, nx, ny, cm_2d)
+            if ( .not. got_nc .and. ( nx /= npixel .or. ny /= nline ) ) then
+                write(0,*) 'ERROR: Brightness temperature and cloud '&
                        'type are at different resolutions. Try another product'
-            stop
-         end if
-         if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
-         rdata(it)%cm(:,:) = cm_2d(:,:)
-         F_out(:,:,nband+1) = cm_2d(:,:)
-         varname_out(nband+1) = 'BCM_'//fsat_id
-      else
-         if ( got_cm ) then
+                stop
+            end if			
+            if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+            rdata(it)%cm(:,:) = cm_2d(:,:)
+            F_out(:,:,nband+1) = cm_2d(:,:)
+            varname_out(nband+1) = 'BCM_'//fsat_id
+      end if 
+	  if ( got_cm ) then
             ffname = trim(data_dir)//'/'//trim(cm_file)
             nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
             if ( nf_status == 0 ) then
@@ -550,7 +571,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
                write(0,*) 'ERROR: Brightness temperature and cloud '&
                           'mask are at different resolutions. Try another product'
                stop
-            end if
+            end if			
             call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
             if ( is_empty_string(time_start(it)) ) then
                continue
@@ -563,19 +584,78 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
             F_out(:,:,nband+1) = cm_2d(:,:)
             varname_out(nband+1) = 'BCM_'//fsat_id
 
-         else if ( got_ht .or. got_phase ) then
-            write(0,*) 'ERROR: reading HEIGHT and PHASE files is NOT implemented YET'
-            stop 1
+       end if 
+	   if ( got_ht ) then
+            write(0,*) 'Added: reading AHI L2 CloudTopPress files'
+            ffname = trim(data_dir)//'/'//trim(ht_file)
+            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+            if ( nf_status == 0 ) then
+               write(0,*) 'Reading '//trim(ffname)
+            else
+               write(0,*) 'ERROR reading '//trim(ffname)
+               stop
+            end if
+            call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
+            allocate (ctt_2d(nx, ny))
+            if ( nx /= npixel .or. ny /= nline ) then
+               write(0,*) 'ERROR: Brightness temperature and cloud '&
+                          'height are at different resolutions. Try another product'
+               stop
+            end if			
+            call read_L2_TEMP(ncid, nx, ny, ctt_2d, time_start(it))
+            if ( is_empty_string(time_start(it)) ) then
+               continue
+            else if ( time_start(it)(1:16) /= scan_time(it)(1:16) ) then
+               write(0,*) 'ERROR: scan start time (up to the minute) from the file name and the file content do not match.'
+               stop
+            end if
+            if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+            rdata(it)%cm(:,:) = ctt_2d(:,:)
+            F_out(:,:,nband+2) = ctt_2d(:,:)
+            varname_out(nband+2) = 'TEMP_'//fsat_id
+
+        end if  
+		if ( got_phase ) then
+            write(0,*) 'Added: reading AHI L2 CloudPhase files'
+            ffname = trim(data_dir)//'/'//trim(phase_file)
+            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+            if ( nf_status == 0 ) then
+               write(0,*) 'Reading '//trim(ffname)
+            else
+               write(0,*) 'ERROR reading '//trim(ffname)
+               stop
+            end if
+            call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
+            allocate (ctph_2d(nx, ny))
+            if ( nx /= npixel .or. ny /= nline ) then
+               write(0,*) 'ERROR: Brightness temperature and cloud '&
+                          'Phase are at different resolutions. Try another product'
+               stop
+            end if				
+            call read_L2_Phase(ncid, nx, ny, ctph_2d, time_start(it))
+            if ( is_empty_string(time_start(it)) ) then
+               continue
+            else if ( time_start(it)(1:16) /= scan_time(it)(1:16) ) then
+               write(0,*) 'ERROR: scan start time (up to the minute) from the file name and the file content do not match.'
+               stop
+            end if
+            if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
+            rdata(it)%cm(:,:) = ctph_2d(:,:)
+            F_out(:,:,nband+3) = ctph_2d(:,:)
+            varname_out(nband+3) = 'Phase_'//fsat_id
+
          end if
+		 
       nf_status = nf_CLOSE(ncid)
-      end if
+     ! end if
    else
       write(0,*) 'ERROR: No valid files. Check the files'
       stop 1
    end if
 
    if ( allocated(cm_2d) )  deallocate(cm_2d)
-
+   if ( allocated(ctt_2d) )  deallocate(ctt_2d)
+   if ( allocated(ctph_2d) )  deallocate(ctph_2d)   
    ! write IODAv1 file
    if ( write_iodav1 ) then
       do it = 1, ntime
@@ -597,6 +677,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
 
    if ( allocated(gsatzen) ) deallocate(gsatzen)
    if ( allocated(gsolzen) ) deallocate(gsolzen)
+
    do it = 1, ntime
       if ( allocated(rdata(it)%rad) ) deallocate (rdata(it)%rad)
       if ( allocated(rdata(it)%bt)  ) deallocate (rdata(it)%bt)
@@ -620,7 +701,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    deallocate(is_HT)
    deallocate(is_HS_HSD)
    deallocate(is_HS_NC)
-
+   
 end subroutine Himawari_ReBroadcast_converter
 
 subroutine read_CLP(ncid, nx, ny, cm)
@@ -777,6 +858,128 @@ subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
 
    return
 end subroutine read_L2_BCM
+
+
+subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   real(r_kind),      intent(inout) :: ctt(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   integer(i_short), allocatable    :: itmp_short_2d(:,:)
+   real(r_kind),  allocatable    :: itmp_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_short)                 :: ifill
+   integer(i_kind)                  :: imiss = -999
+   integer(i_kind)                  :: rmiss = -999.0
+   real(r_single)                   :: scalef, offset
+   integer(i_kind)                  :: qf_temp(nx,ny)
+   character(len=4)                 :: l_unsigned
+   integer(i_kind)                  :: xtype
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudHgtQF', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   qf_temp(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         qf_temp(i,j) = itmp_byte_2d(i,j)
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_2d(nx, ny))
+   nf_status = nf_INQ_VARID(ncid, 'CldTopPres', varid)
+   nf_status = nf_GET_VARA_REAL(ncid, varid, istart(1:2), icount(1:2), itmp_2d(:,:))
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue',  ifill)
+
+
+   ctt(:,:) = rmiss
+   do j = 1, ny
+      do i = 1, nx
+          if (qf_temp(i,j) == 0 ) then ! good quality
+              ctt(i,j) = itmp_2d(i,j)
+          end if
+      end do
+   end do
+   write(*,*) "min/max of cldTopPres =", minval(ctt), maxval(ctt)
+   if( allocated(itmp_2d) ) deallocate(itmp_2d)
+
+   return
+end subroutine read_L2_TEMP
+
+
+subroutine read_L2_Phase(ncid, nx, ny, ctph, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   integer(i_kind),   intent(inout) :: ctph(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_kind)                  :: imiss = -999
+   integer(i_kind)                  :: rmiss = -999.0
+   integer(i_kind)                  :: qf_type(nx,ny)
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudPhaseFlag', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   qf_type(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         qf_type(i,j) = itmp_byte_2d(i,j)
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudType', varid) ! 1-8 type
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   ctph(:,:) = rmiss
+   do j = 1, ny
+      do i = 1, nx
+         !if ( qf_type(i,j) == 0 ) then ! good quality
+            ctph(i,j) = itmp_byte_2d(i,j)
+         !end if
+      end do
+   end do
+   write(*,*) "min/max of ctph =", minval(ctph), maxval(ctph)   
+   deallocate(itmp_byte_2d)
+
+   return
+end subroutine read_L2_Phase
+
 
 subroutine read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
     implicit none
@@ -952,6 +1155,7 @@ subroutine read_HS_NC(ncid, nx, ny, nband, bt, gsolzen, gsatzen, time_start)
    deallocate(itmp_short_2d)
 
 end subroutine read_HS_NC
+
 
 subroutine read_HS_HSD(data_dir, hsd_fnames, satid, nsegm, jday, longitude, latitude, brit, solzen, satzen, valid)
 
@@ -1656,5 +1860,6 @@ subroutine decode_himawari_name(fname, finfo, iband, nsegm, satid, file_time, jd
 
    return
 end subroutine decode_himawari_name
+
 
 end module mod_himawari_ahi

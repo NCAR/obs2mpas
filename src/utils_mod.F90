@@ -49,6 +49,7 @@ integer function shift_right_logical(value, n)
   shift_right_logical = ishft(value, -n)
 end function shift_right_logical
 
+
 ! convert a string to uppercase
 function to_upper(s)
     character(len=*), intent(in) :: s
@@ -430,9 +431,9 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    real(r_kind),       intent(in) :: lon(nC)
    real(r_kind),       intent(in) :: sat_zen(nC)
    real(r_kind),       intent(in) :: sun_zen(nC)
-   real(r_kind),       intent(in) :: bt(nband+1,nC) !BJJ 1:nband for bt, nband+1 for 2d cloud fraction
-   real(r_kind),       intent(in) :: bt_std(nband+1,nC) !BJJ 1:nband for bt, nband+1 for # of obs for SO
-
+   real(r_kind),       intent(in) :: bt(nband+3,nC) !BJJ 1:nband for bt, nband+1 for 2d cloud fraction
+   real(r_kind),       intent(in) :: bt_std(nband+3,nC) !BJJ 1:nband for bt, nband+1 for # of obs for SO  
+! bt from nearest neighbor; bt_std from l_superob
    integer(i_kind), parameter :: nstring = 50
    integer(i_kind), parameter :: ndatetime = 20
    integer(i_kind) :: nvars
@@ -447,7 +448,7 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    real(r_kind), allocatable :: sat_azi_out(:)
    real(r_kind), allocatable :: sun_azi_out(:)
    real(r_kind), allocatable :: bt_out(:,:)
-   real(r_kind), allocatable :: bt_std_out(:,:)
+   real(r_kind), allocatable :: bt_std_out(:,:)   
    real(r_kind), allocatable :: err_out(:,:)
    real(r_kind), allocatable :: qf_out(:,:)
    integer(i_kind), allocatable :: iC_out(:)  !BJJ for cellIndex@MetaData
@@ -491,8 +492,8 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    allocate (sat_azi_out(nlocs))
    allocate (sun_zen_out(nlocs))
    allocate (sun_azi_out(nlocs))
-   allocate (bt_out(nband+1,nlocs)) !BJJ nband+1 for 2d cf
-   allocate (bt_std_out(nband+1,nlocs)) !BJJ nband+1 for 2d cf
+   allocate (bt_out(nband+3,nlocs)) 
+   allocate (bt_std_out(nband+3,nlocs)) 
    allocate (err_out(nband,nlocs))
    allocate (qf_out(nband,nlocs))
    allocate (iC_out(nlocs))  !BJJ for cellIndex@MetaData
@@ -516,8 +517,12 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
       lon_out(iloc) = lon(iC)
       sat_zen_out(iloc) = sat_zen(iC)
       sun_zen_out(iloc) = sun_zen(iC)
-      bt_out(1:nband+1,iloc) = bt(1:nband+1,iC) !BJJ nband+1 for 2d cf
-      bt_std_out(1:nband+1,iloc) = bt_std(1:nband+1,iC) !BJJ nband+1 for 2d cf
+      bt_out(1:nband+1,iloc) = bt(1:nband+1,iC) !nband+1 for 2d clm
+      bt_std_out(1:nband+1,iloc) = bt_std(1:nband+1,iC) !nband+1 for 2d clm
+      bt_out(1:nband+2,iloc) = bt(1:nband+2,iC) !nband+2 for 2d CloudTopPres
+      bt_std_out(1:nband+2,iloc) = bt_std(1:nband+2,iC) !nband+2 for 2d CloudTopPres
+      bt_out(1:nband+3,iloc) = bt(1:nband+3,iC) !nband+3 for 2d CloudType
+      bt_std_out(1:nband+3,iloc) = bt_std(1:nband+3,iC) !nband+3 for 2d CloudType	  
       qf_out(1:nband,iloc) = 0.0 ! BJJ what this can be for superob/nearest obs ?
       scan_pos_out(iloc) = 0.0   ! BJJ what this can be ?
       sat_azi_out(iloc) = missing_r
@@ -567,6 +572,10 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    call def_netcdf_var(ncfileid,ncname,(/ncid_nstring,ncid_nvars/),NF_CHAR)
    ncname = 'cloudAmount@MetaData'
    call def_netcdf_var(ncfileid,ncname,(/ncid_nlocs/),NF_FLOAT)
+   ncname = 'cldTopPres@MetaData'
+   call def_netcdf_var(ncfileid,ncname,(/ncid_nlocs/),NF_FLOAT)
+   ncname = 'cloudType@MetaData'
+   call def_netcdf_var(ncfileid,ncname,(/ncid_nlocs/),NF_FLOAT)   
    ncname = 'obsNumerForSO@MetaData'
    call def_netcdf_var(ncfileid,ncname,(/ncid_nlocs/),NF_FLOAT)
    ncname = 'cellIndex@MetaData'
@@ -608,6 +617,13 @@ subroutine output_iodav1_o2m(fname, time_start, nC, nband, got_latlon, lat, lon,
    call put_netcdf_var(ncfileid,ncname,name_var_tb(1:nband))
    ncname = 'cloudAmount@MetaData'
    call put_netcdf_var(ncfileid,ncname,bt_out(nband+1,:))
+   write(*,*) "check min/max of clm =", minval(bt_out(nband+1,:)), maxval(bt_out(nband+1,:))
+   ncname = 'cldTopPres@MetaData'
+   call put_netcdf_var(ncfileid,ncname,bt_out(nband+2,:))
+   write(*,*) "check min/max of cloud top press =", minval(bt_out(nband+2,:)), maxval(bt_out(nband+2,:))   
+   ncname = 'cloudType@MetaData'
+   call put_netcdf_var(ncfileid,ncname,bt_out(nband+3,:))   
+   write(*,*) "check min/max of cloud type =", minval(bt_out(nband+3,:)), maxval(bt_out(nband+3,:))   
    ncname = 'obsNumerForSO@MetaData'
    call put_netcdf_var(ncfileid,ncname,bt_std_out(nband+1,:))
    ncname = 'cellIndex@MetaData'

@@ -1,28 +1,32 @@
 obs2mpas
 ========
 
-This project is part of the cloud direct insertion project.
-It leverages the work of Jamie Bresch https://github.com/jamiebresch/obs2ioda to retrieve obs data,
-then interpolates to MPAS unstructured mesh.
-This repository was initially designed and written by Yonggang G. Yu.
+This project was initiated as a part of the cloud direct insertion task in the PANDA-C project.
+It leverages the work of Jamie Bresch https://github.com/jamiebresch/obs2ioda to retrieve obs data.
+After reading the ABI L1b and L2 data, they are interpolated or super-obbed to the MPAS unstructured mesh.
+The processed data can be written either in the MPAS file format or in the IODA format (v1 for now).
+This repository can be also applicable for AHI (by Ivette Hernández Baños).
+Initial prototype code was designed and written by Yonggang G. Yu.
 
 Aim
 ---
-- Interpolate fields from obs to model
+- Interpolate fields from obs (geostationary satellite radiance obs) to model grid
 
 
 To build and run (with default option)
 ----------------
 ```
 source mpas-jedi environment
-git clone https://github.com/byoung-joo/obs2model.git
-cd obs2model
+git clone https://github.com/NCAR/obs2mpas.git
+cd obs2mpas
 mkdir build; cd build
 cmake ../ ; make -j4
 cd ../test/abi
 ln ../../build/bin/obs2mpas.x .
 ./obs2mpas.x
 ```
+
+NOTE: For NCAR HPC Derecho, the actual execution of this program should be done in the computational node.
 
 obs2mpas
 ---------
@@ -39,7 +43,7 @@ main.F90
    - 7b. Write the interpolated fields to IODA file
 ```
 
-namelist.obs2model
+namelist.obs2mpas
 ------------------
 ```
 &main_nml

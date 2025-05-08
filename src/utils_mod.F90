@@ -103,7 +103,7 @@ subroutine get_namelist_vars(nfile, fnames, list_files, data_dir, data_id, sat_i
 
    namelist /data_nml/ list_files, data_dir, data_id, sat_id, n_subsample, write_iodav1
 
-   ! initialize namelist variables from namelist.obs2model
+   ! initialize namelist variables from namelist.obs2mpas
    ! &data_nml
    !    list_files = 'flist.txt'               ! list of file names (no path)
    !    data_dir = '/data/goes/or/himawari',   ! path of the observation files
@@ -123,7 +123,7 @@ subroutine get_namelist_vars(nfile, fnames, list_files, data_dir, data_id, sat_i
    write_iodav1      = .false.
 
    ! read namelist
-   open(unit=nml_unit, file='namelist.obs2model', status='old', form='formatted')
+   open(unit=nml_unit, file='namelist.obs2mpas', status='old', form='formatted')
    read(unit=nml_unit, nml=data_nml, iostat=istat)
    write(0,nml=data_nml)
    if ( istat /= 0 ) then

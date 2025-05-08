@@ -15,7 +15,7 @@ module  mod_goes_abi
 !    (1) flist.txt: contains a list of nc files (exclude path) to be processed
 !                     GoesReBroadcast file
 !                     (optional) Clear Sky Mask output of cspp-geo-aitf package
-!    (2) namelist.obs2model
+!    (2) namelist.obs2mpas
 !        &data_nml
 !          list_files = 'flist.txt'        ! list of files
 !          data_dir = '/data/goes',        ! path of the GRB nc files

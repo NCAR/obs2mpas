@@ -17,12 +17,12 @@ module mod_himawari_ahi
 !        unless the netcdf files are used (containing all bands)
 !     2. Does not work for more than one file time at the same time (meaning aggregating times from
 !        only the 00 minutes, not 00 and 10 minutes). More than one time can be done by executing 
-!        obs2model using different files specification in flist.txt
+!        obs2mpas using different files specification in flist.txt
 !
 ! TODO: Implement converting HEIGHT and PHASE files. Need to get the right lat/lon for these files
 !
 ! input files:
-!    (2) namelist.obs2model
+!    (2) namelist.obs2mpas
 !        &data_nml
 !          list_files = 'flist.txt'     ! list of files
 !          data_dir = '/data/himawari', ! path of the HSD files

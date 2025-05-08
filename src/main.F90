@@ -124,7 +124,7 @@ program  main
    l_write_o2m_iodav1 = .false. ! .true.= write superob/neqrest-neighbor into ioda v1 file
 
    ! read namelist
-   open(unit=nml_unit, file='namelist.obs2model', status='old', form='formatted')
+   open(unit=nml_unit, file='namelist.obs2mpas', status='old', form='formatted')
    read(unit=nml_unit, nml=main_nml, iostat=istat)
    write(0,nml=main_nml)
    if ( istat /= 0 ) then

@@ -407,7 +407,13 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
       write(0,*) 'Multiple time file NOT supported yet'
       stop
    else
-      it = ftime_id(1)
+      it = 1  !safe assignment since only one time step is allowed
+   end if
+
+   ! safety check
+   if ( it < 1 .or. it > ntime ) then
+      write(0,*) 'ERROR: index it=', it, ' is out of bounds. ntime=', ntime
+      stop 1
    end if
 
    allocate (time_start(ntime))
@@ -1187,7 +1193,7 @@ subroutine read_HS_HSD(data_dir, hsd_fnames, satid, nsegm, jday, longitude, lati
                         theta1 = 2.0*asin(tmp1/r_eq/2.)
                         theta2 = atan(r_eq*sin(theta1)/((h_sat-r_eq)+r_eq*(1.0-sin(theta1))))
                         satzen(ipixel, iline) = (theta1+theta2) * rad2deg
-                        if ( satzen(ipixel, iline) > 65.0 ) then
+                        if ( satzen(ipixel, iline) > 70.0 ) then !IHB changed from 65 to 70 to match ABI
                            valid(ipixel, iline) = .false.
                         end if
                      end if

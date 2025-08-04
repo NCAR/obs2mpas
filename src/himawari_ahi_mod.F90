@@ -1068,7 +1068,7 @@ subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
       end do
    end do
 
-   write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
+   !write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
    deallocate(itmp_real_2d)
 
    return
@@ -1288,8 +1288,6 @@ subroutine read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out, lat_nam
        end if
      end do
    end do
-
-   deallocate(lat, lon)
 
 end subroutine read_latlon
 

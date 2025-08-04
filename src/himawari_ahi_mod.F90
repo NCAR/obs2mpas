@@ -11,6 +11,7 @@ module mod_himawari_ahi
 !        - Convert Himawari Standard Data (HSD) files to ioda-v1 format. Works for 1 to nsegm files
 !        - Convert Himawari NetCDF files to ioda-v1 format.
 !     2. Get Himawari cloud mask or cloud type NetCDF data and add it to the data structure
+!     3. Get Himawari cloud top height, cloud top temperature, and cloud phase NetCDF data and add it to the data structure
 !
 ! Caveats:
 !     1. Currently only processes bands 7-16. These bands files need to be provided in flist.txt
@@ -19,7 +20,9 @@ module mod_himawari_ahi
 !        only the 00 minutes, not 00 and 10 minutes). More than one time can be done by executing 
 !        obs2mpas using different files specification in flist.txt
 !
-! TODO: Implement converting HEIGHT and PHASE files. Need to get the right lat/lon for these files
+! Notes:
+!     CHGT files contain Enterprise Cloud-top Temperature (CTT)/ Pressure (CTP)/ Height (CTH) Products
+!     CPHS files contain Enterprise Cloud Phase and Type (not implemented yet) Products
 !
 ! input files:
 !    (2) namelist.obs2mpas
@@ -58,7 +61,7 @@ module mod_himawari_ahi
   integer(i_kind), parameter :: npixel = 5500
   integer(i_kind), parameter :: nline  = 5500
   integer(i_kind), parameter :: nband = 10  ! number of infrared bands
-  integer(i_kind) :: nsegm       ! number of segment
+  integer(i_kind)            :: nsegm       ! number of segment
   integer(i_kind)            :: band_start = 7
   integer(i_kind)            :: band_end   = 16
 
@@ -75,7 +78,7 @@ module mod_himawari_ahi
   integer(i_kind)    :: n_subsample
   logical            :: write_iodav1
 
-  integer(i_kind)    :: nfile, ifile, iband
+  integer(i_kind)    :: nfile, ifile, iband, out_index
   character(len=512) :: ffname
   logical            :: isfile
   character(len=2)   :: finfo
@@ -102,13 +105,18 @@ module mod_himawari_ahi
   integer(i_kind) :: ntime
   integer(i_kind) :: t_index
   integer(i_kind) :: band_id
+  integer(i_kind) :: MAX_L2  ! BCM(1) + HT/PRES/TEMP(3) + PHASE(1)
 
   logical              :: found_time
-  logical              :: got_hs, got_nc, got_clp, got_cm, got_ht, got_phase
+  logical              :: got_rad, got_hs, got_nc, got_clp, got_cm, got_ht, got_phase
   character(len=256)   :: btnc_file, cm_file, ht_file, phase_file
 
   integer(i_kind), allocatable :: cm_2d(:,:)   ! cloud_mask(nx,ny)
   real(r_kind),    allocatable :: bt_3d(:,:,:) ! brightness temperature(nband,nx,ny)
+  real(r_kind),    allocatable :: ctt_2d(:,:)  ! cloud top temperature(nx,ny)
+  real(r_kind),    allocatable :: ctph_2d(:,:) ! cloud top phase(nx,ny)
+  real(r_kind),    allocatable :: cth_2d(:,:)  ! cloud top height(nx,ny)
+  real(r_kind),    allocatable :: ctp_2d(:,:)  ! cloud top pressure(nx,ny)
 
   type rad_type
      real(r_kind),    allocatable :: rad(:,:,:)  ! radiance(nband,nx,ny)
@@ -319,6 +327,14 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    is_Phase(:) = .false.
    is_HT(:)    = .false.
 
+   got_rad = .false.
+   got_hs = .false.
+   got_nc = .false.
+   got_clp = .false.
+   got_cm = .false.
+   got_ht = .false.
+   got_phase = .false.
+
    ! parse the file list
    t_index = 0
    file_loop1: do ifile = 1, nfile
@@ -355,8 +371,10 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
      end if
      if ( is_HS_HSD(ifile) ) then
         got_hs = .true.
+        got_rad = .true.
      else if ( is_HS_NC(ifile) ) then
         got_nc = .true.
+        got_rad = .true.
         btnc_file = fnames(ifile)
      else if ( is_CLP(ifile) ) then
         got_clp = .true.
@@ -364,12 +382,12 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
      else if ( is_BCM(ifile) ) then
         got_cm = .true.
         cm_file = fnames(ifile)
-     else if ( is_Phase(ifile) ) then
-        got_phase = .true.
-        phase_file = fnames(ifile)
      else if ( is_HT(ifile) ) then
         got_ht = .true.
         ht_file = fnames(ifile)
+     else if ( is_Phase(ifile) ) then
+        got_phase = .true.
+        phase_file = fnames(ifile)
      end if
 
      valid(ifile) = .true.
@@ -407,7 +425,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
       write(0,*) 'Multiple time file NOT supported yet'
       stop
    else
-      it = 1  !safe assignment since only one time step is allowed
+      it = 1 !safe assignment since only one time step is allowed
    end if
 
    ! safety check
@@ -419,105 +437,112 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    allocate (time_start(ntime))
    allocate (rdata(ntime))
 
+   ncid = -1
+   MAX_L2 = merge(size(valid) + 2, size(valid), got_ht)
+   out_index = 1
+
    if ( any(valid) ) then
-      if ( got_hs ) then
 
-         allocate (got_latlon_out(npixel, nline))
-         allocate (glat_out(npixel, nline))
-         allocate (glon_out(npixel, nline))
-         allocate (gsolzen(npixel, nline))
-         allocate (gsatzen(npixel, nline))
-         glat_out(:,:)  = missing_r
-         glon_out(:,:)  = missing_r
-         gsolzen(:,:)   = missing_r
-         gsatzen(:,:)   = missing_r
+      if ( got_rad ) then
+         if ( got_hs ) then
+            allocate (got_latlon_out(npixel, nline))
+            allocate (glat_out(npixel, nline))
+            allocate (glon_out(npixel, nline))
+            allocate (gsolzen(npixel, nline))
+            allocate (gsatzen(npixel, nline))
+            glat_out(:,:)  = missing_r
+            glon_out(:,:)  = missing_r
+            gsolzen(:,:)   = missing_r
+            gsatzen(:,:)   = missing_r
 
-         allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         F_out(:,:,:)   = missing_r
+            allocate (F_out(npixel, nline, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            F_out(:,:,:)   = missing_r
+            allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            varname_out(:) = ''
 
-         allocate (varname_out(nband+1))          !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         varname_out(:) = ''
+            nsegm = segm(1)
+            call read_HS_HSD(data_dir, fnames, fsat_id, nsegm, julianday, glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
+            F_out(1:npixel,1:nline,1:nband) = brit(1:npixel,1:nline,1:nband)
 
-         nsegm = segm(1)
-         call read_HS_HSD(data_dir, fnames, fsat_id, nsegm, julianday, glon_out, glat_out, brit, gsolzen, gsatzen, got_latlon_out)
-         F_out(1:npixel,1:nline,1:nband) = brit(1:npixel,1:nline,1:nband)
+            if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,npixel, nline))
+            if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,npixel, nline))
+            if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband,npixel, nline))
+            if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
 
-         if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,npixel, nline))
-         if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,npixel, nline))
-         if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband,npixel, nline))
-         if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
-
-         do ib = 1, nband
-            do j = 1, nline
-               do i = 1, npixel
-                  rdata(it)%rad(ib, i, j) = missing_r
-                  rdata(it)%bt(ib, i, j) = brit(i, j, ib)
-                  rdata(it)%qf(ib, i, j) = missing_r
-                  rdata(it)%sd(ib) = missing_r
+            do ib = 1, nband
+               do j = 1, nline
+                  do i = 1, npixel
+                     rdata(it)%rad(ib, i, j) = missing_r
+                     rdata(it)%bt(ib, i, j) = brit(i, j, ib)
+                     rdata(it)%qf(ib, i, j) = missing_r
+                     rdata(it)%sd(ib) = missing_r
+                  end do
                end do
+               write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib+6
             end do
-            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib+6
-         end do
-         ! additional info for writing ioda at MPAS mesh !BJJ
-         write(15,*) it, scan_time(it), julianday(it)
+            ! additional info for writing ioda at MPAS mesh !BJJ
+            write(15,*) it, scan_time(it), julianday(it)
 
-      else if ( got_nc ) then
-         ffname = trim(data_dir)//'/'//trim(btnc_file)
-         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
-         if ( nf_status == 0 ) then
-            write(0,*) 'Reading '//trim(ffname)
+         else if ( got_nc ) then
+            ffname = trim(data_dir)//'/'//trim(btnc_file)
+            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+            if ( nf_status == 0 ) then
+               write(0,*) 'Reading '//trim(ffname)
+            else
+               write(0,*) 'ERROR reading '//trim(ffname)
+               stop 1
+            end if
+            call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
+            allocate (got_latlon_out(nx, ny))
+            allocate (glat_out(nx, ny))
+            allocate (glon_out(nx, ny))
+            allocate (gsolzen(nx, ny))
+            allocate (gsatzen(nx, ny))
+            glat_out(:,:)  = missing_r
+            glon_out(:,:)  = missing_r
+            gsolzen(:,:)   = missing_r
+            gsatzen(:,:)   = missing_r
+
+            allocate (F_out(nx, ny, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            F_out(:,:,:)   = missing_r
+            allocate (varname_out(nband+1))   !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
+            varname_out(:) = ''
+
+            ! get latitude/longitude 1D
+            call read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
+
+            allocate (bt_3d(nx, ny, nband))
+            call read_HS_NC(ncid, nx, ny, nband, bt_3d, gsolzen, gsatzen, time_start(it))
+            F_out(1:nx,1:ny,1:nband) = bt_3d(1:nx,1:ny,1:nband)
+
+            if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,nx, ny))
+            if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,nx, ny))
+            if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband,nx, ny))
+            if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
+
+            do ib = 1, nband
+               do j = 1, ny
+                  do i = 1, nx
+                     rdata(it)%rad(ib, i, j) = missing_r
+                     rdata(it)%bt(ib, i, j) = bt_3d(i, j, ib)
+                     rdata(it)%qf(ib, i, j) = missing_r
+                     rdata(it)%sd(ib) = missing_r
+                  end do
+               end do
+               write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib+6
+            end do
+            ! additional info for writing ioda at MPAS mesh !BJJ
+            write(15,*) it, scan_time(it), julianday(it)
+            deallocate(bt_3d)
+
          else
-            write(0,*) 'ERROR reading '//trim(ffname)
+            write(0,*) 'ERROR: Invalid file for Brightness Temperature data'
             stop 1
          end if
-         call read_GRB_dims(ncid, 'latitude', 'longitude', nx, ny)
-         allocate (got_latlon_out(nx, ny))
-         allocate (glat_out(nx, ny))
-         allocate (glon_out(nx, ny))
-         allocate (gsolzen(nx, ny))
-         allocate (gsatzen(nx, ny))
-         glat_out(:,:)  = missing_r
-         glon_out(:,:)  = missing_r
-         gsolzen(:,:)   = missing_r
-         gsatzen(:,:)   = missing_r
 
-         allocate (F_out(nx, ny, nband+1)) !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         F_out(:,:,:)   = missing_r
-
-         allocate (varname_out(nband+1))   !IHB BJJ: 1:nband for bt, nband+1 for # of obs for SO
-         varname_out(:) = ''
-
-         ! get latitude/longitude
-         call read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
-
-         allocate (bt_3d(nx, ny, nband))
-         call read_HS_NC(ncid, nx, ny, nband, bt_3d, gsolzen, gsatzen, time_start(it))
-         F_out(1:nx,1:ny,1:nband) = bt_3d(1:nx,1:ny,1:nband)
-
-         if ( .not. allocated(rdata(it)%rad) ) allocate (rdata(it)%rad(nband,nx, ny))
-         if ( .not. allocated(rdata(it)%bt) )  allocate (rdata(it)%bt(nband,nx, ny))
-         if ( .not. allocated(rdata(it)%qf) )  allocate (rdata(it)%qf(nband,nx, ny))
-         if ( .not. allocated(rdata(it)%sd) )  allocate (rdata(it)%sd(nband))
-
-         do ib = 1, nband
-            do j = 1, ny
-               do i = 1, nx
-                  rdata(it)%rad(ib, i, j) = missing_r
-                  rdata(it)%bt(ib, i, j) = bt_3d(i, j, ib)
-                  rdata(it)%qf(ib, i, j) = missing_r
-                  rdata(it)%sd(ib) = missing_r
-               end do
-            end do
-            write(varname_out(ib),"(A,I2.2)") 'BT_'//fsat_id//'C', ib+6
-         end do
-         ! additional info for writing ioda at MPAS mesh !BJJ
-         write(15,*) it, scan_time(it), julianday(it)
-         deallocate(bt_3d)
-
-      else
-         write(0,*) 'ERROR: Invalid file for Brightness Temperature data'
-         stop 1
       end if
+
+      ! process L2 products
 
       if ( got_clp ) then
          ffname = trim(data_dir)//'/'//trim(cm_file)
@@ -537,50 +562,198 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
             stop
          end if
          if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
-         rdata(it)%cm(:,:) = cm_2d(:,:)
-         F_out(:,:,nband+1) = cm_2d(:,:)
-         varname_out(nband+1) = 'BCM_'//fsat_id
-      else
-         if ( got_cm ) then
-            ffname = trim(data_dir)//'/'//trim(cm_file)
-            nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
-            if ( nf_status == 0 ) then
-               write(0,*) 'Reading '//trim(ffname)
-            else
-               write(0,*) 'ERROR reading '//trim(ffname)
-               stop
+         if ( got_rad ) then
+            rdata(it)%cm(:,:) = cm_2d(:,:)
+            F_out(:,:,nband+1) = cm_2d(:,:)
+            varname_out(nband+1) = 'BCM_'//fsat_id
+         else
+            ! get latitude/longitude 1D
+            if (.not. allocated(glat_out)) allocate(glat_out(nx, ny))
+            if (.not. allocated(glon_out)) allocate(glon_out(nx, ny))
+            if (.not. allocated(got_latlon_out)) allocate(got_latlon_out(nx, ny))
+            glat_out(:,:)  = missing_r
+            glon_out(:,:)  = missing_r
+
+            call read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
+
+            if (.not. allocated(F_out)) then
+                allocate(F_out(nx, ny, MAX_L2))
+                F_out = missing_r
             end if
-            call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
-            allocate (cm_2d(nx, ny))
-            if ( nx /= npixel .or. ny /= nline ) then
-               write(0,*) 'ERROR: Brightness temperature and cloud '&
-                          'mask are at different resolutions. Try another product'
-               stop
+
+            if (.not. allocated(varname_out)) then
+                allocate(varname_out(MAX_L2))
+                varname_out = ''
             end if
-            call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
-            if ( is_empty_string(time_start(it)) ) then
-               continue
-            else if ( time_start(it)(1:16) /= scan_time(it)(1:16) ) then
-               write(0,*) 'ERROR: scan start time (up to the minute) from the file name and the file content do not match.'
-               stop
-            end if
+
+            F_out(:,:,out_index) = cm_2d(:,:)
+            varname_out(out_index) = 'BCM_'//fsat_id
+            out_index = out_index + 1
+         end if
+         deallocate (cm_2d)
+      end if
+
+      if ( got_cm ) then
+         ffname = trim(data_dir)//'/'//trim(cm_file)
+         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+         if ( nf_status == 0 ) then
+            write(0,*) 'Reading '//trim(ffname)
+         else
+            write(0,*) 'ERROR reading '//trim(ffname)
+            stop
+         end if
+         call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
+         allocate (cm_2d(nx, ny))
+         if ( nx /= npixel .or. ny /= nline ) then
+            write(0,*) 'ERROR: Brightness temperature and cloud '&
+                       'mask are at different resolutions. Try another product'
+            stop
+         end if
+         call read_L2_BCM(ncid, nx, ny, cm_2d, time_start(it))
+         if ( is_empty_string(time_start(it)) ) then
+            continue
+         else if ( time_start(it)(1:16) /= scan_time(it)(1:16) ) then
+            write(0,*) 'ERROR: scan start time (up to the minute) from the file name and the file content do not match.'
+            stop
+         end if
+         if ( got_rad ) then
             if ( .not. allocated(rdata(it)%cm) )  allocate (rdata(it)%cm(nx,ny))
             rdata(it)%cm(:,:) = cm_2d(:,:)
             F_out(:,:,nband+1) = cm_2d(:,:)
             varname_out(nband+1) = 'BCM_'//fsat_id
+         else
+            ! get latitude/longitude 2D
+            if (.not. allocated(glat_out)) allocate(glat_out(nx, ny))
+            if (.not. allocated(glon_out)) allocate(glon_out(nx, ny))
+            if (.not. allocated(got_latlon_out)) allocate(got_latlon_out(nx, ny))
+            glat_out(:,:)  = missing_r
+            glon_out(:,:)  = missing_r
+            call read_latlon_2d(ncid, nx, ny, glon_out, glat_out, got_latlon_out, 'Latitude', 'Longitude')
 
-         else if ( got_ht .or. got_phase ) then
-            write(0,*) 'ERROR: reading HEIGHT and PHASE files is NOT implemented YET'
-            stop 1
+            if (.not. allocated(F_out)) then
+                allocate(F_out(nx, ny, MAX_L2))
+                F_out = missing_r
+            end if
+
+            if (.not. allocated(varname_out)) then
+                allocate(varname_out(MAX_L2))
+                varname_out = ''
+            end if
+
+            F_out(:,:,out_index) = cm_2d(:,:)
+            varname_out(out_index) = 'BCM_'//fsat_id
+            out_index = out_index + 1
          end if
-      nf_status = nf_CLOSE(ncid)
+         deallocate (cm_2d)
       end if
+
+      if ( got_ht ) then
+         ffname = trim(data_dir)//'/'//trim(ht_file)
+         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+         if ( nf_status == 0 ) then
+            write(0,*) 'Reading '//trim(ffname)
+         else
+            write(0,*) 'ERROR reading '//trim(ffname)
+            stop
+         end if
+         call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
+         allocate (cth_2d(nx, ny))
+         allocate (ctp_2d(nx, ny))
+         allocate (ctt_2d(nx, ny))
+         call read_L2_HT(ncid, nx, ny, cth_2d, time_start(it))
+         call read_L2_PRES(ncid, nx, ny, ctp_2d, time_start(it))
+         call read_L2_TEMP(ncid, nx, ny, ctt_2d, time_start(it))
+         if ( is_empty_string(time_start(it)) ) then
+            continue
+         else if ( time_start(it)(1:16) /= scan_time(it)(1:16) ) then
+            write(0,*) 'ERROR: scan start time (up to the minute) from the file name and the file content do not match.'
+            stop
+         end if
+         ! get latitude/longitude 2D
+         if (.not. allocated(glat_out)) allocate(glat_out(nx, ny))
+         if (.not. allocated(glon_out)) allocate(glon_out(nx, ny))
+         if (.not. allocated(got_latlon_out)) allocate(got_latlon_out(nx, ny))
+         glat_out(:,:)  = missing_r
+         glon_out(:,:)  = missing_r
+         call read_latlon_2d(ncid, nx, ny, glon_out, glat_out, got_latlon_out, 'Latitude_Pc', 'Longitude_Pc')
+
+         if (.not. allocated(F_out)) then
+             allocate(F_out(nx, ny, MAX_L2))
+             F_out = missing_r
+         end if
+
+         if (.not. allocated(varname_out)) then
+             allocate(varname_out(MAX_L2))
+             varname_out = ''
+         end if
+
+         F_out(1:nx,1:ny,out_index)=cth_2d(1:nx,1:ny)
+         varname_out(out_index)='HT_'//fsat_id
+         out_index = out_index + 1
+
+         F_out(1:nx,1:ny,out_index)=ctp_2d(1:nx,1:ny)
+         varname_out(out_index)='PRES_'//fsat_id
+         out_index = out_index + 1
+
+         F_out(1:nx,1:ny,out_index)=ctt_2d(1:nx,1:ny)
+         varname_out(out_index)='TEMP_'//fsat_id
+         out_index = out_index + 1
+
+         deallocate (cth_2d)
+         deallocate (ctp_2d)
+         deallocate (ctt_2d)
+      end if
+
+      if ( got_phase ) then
+         ffname = trim(data_dir)//'/'//trim(phase_file)
+         nf_status = nf_OPEN(trim(ffname), nf_NOWRITE, ncid)
+         if ( nf_status == 0 ) then
+            write(0,*) 'Reading '//trim(ffname)
+         else
+            write(0,*) 'ERROR reading '//trim(ffname)
+            stop
+         end if
+         call read_GRB_dims(ncid, 'Rows', 'Columns', nx, ny)
+         allocate (ctph_2d(nx, ny))
+         call read_L2_Phase(ncid, nx, ny, ctph_2d, time_start(it))
+         if ( is_empty_string(time_start(it)) ) then
+            continue
+         else if ( time_start(it)(1:16) /= scan_time(it)(1:16) ) then
+            write(0,*) 'ERROR: scan start time (up to the minute) from the file name and the file content do not match.'
+            stop
+         end if
+
+         ! get latitude/longitude 2D
+         if (.not. allocated(glat_out)) allocate(glat_out(nx, ny))
+         if (.not. allocated(glon_out)) allocate(glon_out(nx, ny))
+         if (.not. allocated(got_latlon_out)) allocate(got_latlon_out(nx, ny))
+         glat_out(:,:)  = missing_r
+         glon_out(:,:)  = missing_r
+         call read_latlon_2d(ncid, nx, ny, glon_out, glat_out, got_latlon_out, 'Latitude', 'Longitude')
+
+         if (.not. allocated(F_out)) then
+             allocate(F_out(nx, ny, MAX_L2))
+             F_out = missing_r
+         end if
+
+         if (.not. allocated(varname_out)) then
+             allocate(varname_out(MAX_L2))
+             varname_out = ''
+         end if
+
+         F_out(1:nx,1:ny,out_index)=ctph_2d(1:nx,1:ny)
+         varname_out(out_index)='Phase_'//fsat_id
+         out_index = out_index + 1
+         deallocate (ctph_2d)
+      end if
+
+      nf_status = nf_CLOSE(ncid)
+
    else
       write(0,*) 'ERROR: No valid files. Check the files'
       stop 1
-   end if
 
-   if ( allocated(cm_2d) )  deallocate(cm_2d)
+   end if
 
    ! write IODAv1 file
    if ( write_iodav1 ) then
@@ -628,6 +801,278 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
    deallocate(is_HS_NC)
 
 end subroutine Himawari_ReBroadcast_converter
+
+subroutine read_L2_HT(ncid, nx, ny, cth, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   real(r_kind),      intent(inout) :: cth(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   real(r_single),   allocatable    :: itmp_real_2d(:,:)
+   integer(i_kind)                  :: qf(nx,ny)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   real(r_single)                   :: rfill
+   integer(i_byte)                  :: byte_fill
+   integer(i_kind)                  :: imiss = -999
+   real(r_kind)                     :: rmiss = -999.0_r_kind
+   real(r_single), parameter        :: valid_min = -300.0_r_single
+   real(r_single), parameter        :: valid_max = 20000.0_r_single
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudHgtQF', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   nf_status = nf_GET_ATT_INT1(ncid, varid, '_FillValue', byte_fill)
+   qf(:,:) = imiss
+   ! only valid_range and non-missing values
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_byte_2d(i,j) /= byte_fill .and. &
+             itmp_byte_2d(i,j) >= 0 .and. itmp_byte_2d(i,j) <= 4) then
+            qf(i,j) = itmp_byte_2d(i,j)
+         end if
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_real_2d(nx, ny))
+   nf_status = nf_INQ_VARID(ncid, 'CldTopHght', varid)
+   nf_status = nf_GET_VARA_REAL(ncid, varid, istart(1:2), icount(1:2), itmp_real_2d(:,:))
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue',  rfill)
+
+   cth(:,:) = rmiss
+
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_real_2d(i,j) /= rfill .and. &
+            itmp_real_2d(i,j) >= valid_min .and. itmp_real_2d(i,j) <= valid_max) then
+            if (qf(i,j) == 0) then
+               cth(i,j) = real(itmp_real_2d(i,j), r_kind)
+            end if
+         end if
+      end do
+   end do
+
+   !write(*,*) "min/max of cth =", minval(cth), maxval(cth)
+   deallocate(itmp_real_2d)
+
+   return
+end subroutine read_L2_HT
+
+subroutine read_L2_PRES(ncid, nx, ny, ctp, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   real(r_kind),      intent(inout) :: ctp(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   real(r_single),   allocatable    :: itmp_real_2d(:,:)
+   integer(i_kind)                  :: qf(nx,ny)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   real(r_single)                   :: rfill
+   integer(i_byte)                  :: byte_fill
+   integer(i_kind)                  :: imiss = -999
+   real(r_kind)                     :: rmiss = -999.0_r_kind
+   real(r_single), parameter        :: valid_min = 0.0_r_single
+   real(r_single), parameter        :: valid_max = 1100.0_r_single
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudHgtQF', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   nf_status = nf_GET_ATT_INT1(ncid, varid, '_FillValue', byte_fill)
+   qf(:,:) = imiss
+   ! only valid_range and non-missing values
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_byte_2d(i,j) /= byte_fill .and. &
+             itmp_byte_2d(i,j) >= 0 .and. itmp_byte_2d(i,j) <= 4) then
+            qf(i,j) = itmp_byte_2d(i,j)
+         end if
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_real_2d(nx, ny))
+   nf_status = nf_INQ_VARID(ncid, 'CldTopPres', varid)
+   nf_status = nf_GET_VARA_REAL(ncid, varid, istart(1:2), icount(1:2), itmp_real_2d(:,:))
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue',  rfill)
+
+   ctp(:,:) = rmiss
+
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_real_2d(i,j) /= rfill .and. &
+            itmp_real_2d(i,j) >= valid_min .and. itmp_real_2d(i,j) <= valid_max) then
+            if (qf(i,j) == 0) then
+               ctp(i,j) = real(itmp_real_2d(i,j), r_kind)
+            end if
+         end if
+      end do
+   end do
+
+   !write(*,*) "min/max of ctp =", minval(ctp), maxval(ctp)
+   deallocate(itmp_real_2d)
+
+   return
+end subroutine read_L2_PRES
+
+subroutine read_L2_Phase(ncid, nx, ny, ctph, time_start)
+   implicit none
+
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   real(r_kind),      intent(inout) :: ctph(nx,ny)
+   character(len=22), intent(out)   :: time_start
+   integer(i_byte), allocatable     :: itmp_byte_2d(:,:)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   integer(i_kind)                  :: imiss = -999
+   real(r_kind)                     :: rmiss = -999.0
+   integer(i_kind)                  :: qf(nx,ny)
+   integer(i_byte)                  :: bfill
+   bfill = -128
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   istart(2) = 1
+   icount(1) = nx
+   icount(2) = ny
+
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudPhaseFlag', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d)
+   qf(:,:) = imiss
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_byte_2d(i,j) /= bfill) qf(i,j) = itmp_byte_2d(i,j)
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudPhase', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d)
+   ctph(:,:) = rmiss
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_byte_2d(i,j) /= bfill .and. qf(i,j) == 0) then
+            ctph(i,j) = real(itmp_byte_2d(i,j), kind=r_kind)
+         end if
+      end do
+   end do
+
+   !write(*,*) "min/max of ctph =", minval(ctph), maxval(ctph)
+   deallocate(itmp_byte_2d)
+
+   return
+end subroutine read_L2_Phase
+
+subroutine read_L2_TEMP(ncid, nx, ny, ctt, time_start)
+   implicit none
+   integer(i_kind),   intent(in)    :: ncid
+   integer(i_kind),   intent(in)    :: nx, ny
+   real(r_kind),      intent(inout) :: ctt(nx,ny)
+   character(len=22), intent(out)   :: time_start  ! 2017-10-01T18:02:19.6Z
+   integer(i_byte),  allocatable    :: itmp_byte_2d(:,:)
+   real(r_single),   allocatable    :: itmp_real_2d(:,:)
+   integer(i_kind)                  :: qf(nx,ny)
+   integer(i_kind)                  :: nf_status
+   integer(i_kind)                  :: istart(2), icount(2)
+   integer(i_kind)                  :: varid, i, j
+   real(r_single)                   :: rfill
+   integer(i_byte)                  :: byte_fill
+   integer(i_kind)                  :: imiss = -999
+   real(r_kind)                     :: rmiss = -999.0_r_kind
+   real(r_single), parameter        :: valid_min = 180.0_r_single
+   real(r_single), parameter        :: valid_max = 340.0_r_single
+   continue
+
+   ! time_start is the same for all bands, but time_end is not
+   nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_start', time_start)
+   !nf_status = nf_GET_ATT_TEXT(ncid, nf_GLOBAL, 'time_coverage_end',   time_end)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_byte_2d(nx,ny))
+   nf_status = nf_INQ_VARID(ncid, 'CloudHgtQF', varid)
+   nf_status = nf_GET_VARA_INT1(ncid, varid, istart(1:2), icount(1:2), itmp_byte_2d(:,:))
+   nf_status = nf_GET_ATT_INT1(ncid, varid, '_FillValue', byte_fill)
+   qf(:,:) = imiss
+   ! only valid_range (0b, 4b) and non-missing values
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_byte_2d(i,j) /= byte_fill .and. &
+             itmp_byte_2d(i,j) >= 0 .and. itmp_byte_2d(i,j) <= 4) then
+            qf(i,j) = itmp_byte_2d(i,j)
+         end if
+      end do
+   end do
+   deallocate(itmp_byte_2d)
+
+   istart(1) = 1
+   icount(1) = nx
+   istart(2) = 1
+   icount(2) = ny
+   allocate(itmp_real_2d(nx, ny))
+   nf_status = nf_INQ_VARID(ncid, 'CldTopTemp', varid)
+   nf_status = nf_GET_VARA_REAL(ncid, varid, istart(1:2), icount(1:2), itmp_real_2d(:,:))
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue',  rfill)
+
+   ctt(:,:) = rmiss
+
+   do j = 1, ny
+      do i = 1, nx
+         if (itmp_real_2d(i,j) /= rfill .and. &
+            itmp_real_2d(i,j) >= valid_min .and. itmp_real_2d(i,j) <= valid_max) then
+            if (qf(i,j) == 0) then
+               ctt(i,j) = real(itmp_real_2d(i,j), r_kind)
+            end if
+         end if
+      end do
+   end do
+
+   write(*,*) "min/max of ctt =", minval(ctt), maxval(ctt)
+   deallocate(itmp_real_2d)
+
+   return
+end subroutine read_L2_TEMP
 
 subroutine read_CLP(ncid, nx, ny, cm)
    implicit none
@@ -784,59 +1229,138 @@ subroutine read_L2_BCM(ncid, nx, ny, cm, time_start)
    return
 end subroutine read_L2_BCM
 
-subroutine read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out)
-    implicit none
-    integer, intent(in)    :: ncid
-    integer, intent(in)    :: nx, ny
-    real,    intent(inout) :: glon_out(nx, ny)
-    real,    intent(inout) :: glat_out(nx, ny)
-    logical, intent(inout) :: got_latlon_out(nx, ny)
+subroutine read_latlon(ncid, nx, ny, glon_out, glat_out, got_latlon_out, lat_name, lon_name)
+   implicit none
+   integer, intent(in)            :: ncid
+   integer, intent(in)            :: nx, ny
+   real,    intent(inout)         :: glon_out(nx, ny)
+   real,    intent(inout)         :: glat_out(nx, ny)
+   logical, intent(inout)         :: got_latlon_out(nx, ny)
+   character(len=*), intent(in), optional :: lat_name, lon_name
 
-    real                   :: rfill_lat, rfill_lon
-    real                   :: lat(nx), lon(ny)
-    integer                :: varid, nf_status
-    integer                :: i, j
+   character(len=:), allocatable  :: lat_varname, lon_varname
+   real                           :: lat(nx), lon(ny)
+   real                           :: rfill_lat, rfill_lon
+   integer                        :: varid, nf_status
+   integer                        :: i, j
 
-    ! get latitude
-    nf_status = nf_INQ_VARID(ncid, 'latitude', varid)
-    if (nf_status /= NF_NOERR) then
-        print *, 'Error: Could not find variable "latitude" in NetCDF file.'
-        stop 1
-    end if
-    nf_status = nf_GET_VAR_REAL(ncid, varid, lat)
-    nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lat)
+   ! set default variable names
+   lat_varname = 'latitude'
+   lon_varname = 'longitude'
+   if (present(lat_name)) lat_varname = trim(lat_name)
+   if (present(lon_name)) lon_varname = trim(lon_name)
 
-    ! get longitude
-    nf_status = nf_INQ_VARID(ncid, 'longitude', varid)
-    if (nf_status /= NF_NOERR) then
-        print *, 'Error: Could not find variable "longitude" in NetCDF file.'
-        stop 1
-    end if
-    nf_status = nf_GET_VAR_REAL(ncid, varid, lon)
-    nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lon)
+   ! get latitude
+   nf_status = nf_INQ_VARID(ncid, lat_varname, varid)
+   if (nf_status /= NF_NOERR) then
+     print *, 'Error: Could not find variable "', lat_varname, '" in NetCDF file.'
+     stop 1
+   end if
+   nf_status = nf_GET_VAR_REAL(ncid, varid, lat)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lat)
 
-    ! longitudes are 0-360, convert them to -180 to 180
-    do j = 1, ny
-       if (lon(j) > 180.0) then
-           lon(j) = lon(j) - 360.0
-       elseif (lon(j) < -180.0) then
-           lon(j) = lon(j) + 360.0
+   ! get longitude
+   nf_status = nf_INQ_VARID(ncid, lon_varname, varid)
+   if (nf_status /= NF_NOERR) then
+     print *, 'Error: Could not find variable "', lon_varname, '" in NetCDF file.'
+     stop 1
+   end if
+   nf_status = nf_GET_VAR_REAL(ncid, varid, lon)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lon)
+
+   ! longitudes are 0-360, convert them to -180 to 180
+   do j = 1, ny
+      if (lon(j) > 180.0) then
+          lon(j) = lon(j) - 360.0
+      elseif (lon(j) < -180.0) then
+          lon(j) = lon(j) + 360.0
+      end if
+   end do
+
+   got_latlon_out = .true.
+   do j = 1, ny
+     do i = 1, nx
+       if (lat(j) == rfill_lat .or. lon(i) == rfill_lon) then
+         got_latlon_out(i,j) = .false.
+       else
+         glat_out(i,j) = lat(j)
+         glon_out(i,j) = lon(i)
        end if
-    end do
+     end do
+   end do
 
-    got_latlon_out = .true.
-    do j = 1, ny
-        do i = 1, nx
-            if (lat(j) == rfill_lat .or. lon(i) == rfill_lon) then
-                got_latlon_out(i,j) = .false.
-            else
-                glat_out(i,j) = lat(j)
-                glon_out(i,j) = lon(i)
-            end if
-        end do
-    end do
+   deallocate(lat, lon)
 
 end subroutine read_latlon
+
+subroutine read_latlon_2d(ncid, nx, ny, glon_out, glat_out, got_latlon_out, lat_name, lon_name)
+   implicit none
+   integer, intent(in)            :: ncid
+   integer, intent(in)            :: nx, ny
+   real,    intent(inout)         :: glon_out(nx, ny)
+   real,    intent(inout)         :: glat_out(nx, ny)
+   logical, intent(inout)         :: got_latlon_out(nx, ny)
+   character(len=*), intent(in), optional :: lat_name, lon_name
+
+   character(len=:), allocatable  :: lat_varname, lon_varname
+   real, allocatable              :: lat(:,:), lon(:,:)
+   real                           :: rfill_lat, rfill_lon
+   integer                        :: varid, nf_status
+   integer                        :: i, j
+
+   ! set default variable names
+   lat_varname = 'latitude'
+   lon_varname = 'longitude'
+   if (present(lat_name)) lat_varname = trim(lat_name)
+   if (present(lon_name)) lon_varname = trim(lon_name)
+
+   allocate(lat(nx, ny))
+   allocate(lon(nx, ny))
+
+   ! get latitude
+   nf_status = nf_INQ_VARID(ncid, lat_varname, varid)
+   if (nf_status /= NF_NOERR) then
+     print *, 'Error: Could not find variable "', lat_varname, '" in NetCDF file.'
+     stop 1
+   end if
+   nf_status = nf_GET_VAR_REAL(ncid, varid, lat)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lat)
+
+   ! get longitude
+   nf_status = nf_INQ_VARID(ncid, lon_varname, varid)
+   if (nf_status /= NF_NOERR) then
+     print *, 'Error: Could not find variable "', lon_varname, '" in NetCDF file.'
+     stop 1
+   end if
+   nf_status = nf_GET_VAR_REAL(ncid, varid, lon)
+   nf_status = nf_GET_ATT_REAL(ncid, varid, '_FillValue', rfill_lon)
+
+    ! longitudes are 0-360, convert them to -180 to 180
+   do j = 1, ny
+     do i = 1, nx
+       if (lon(i,j) > 180.0) then
+           lon(i,j) = lon(i,j) - 360.0
+       elseif (lon(i,j) < -180.0) then
+           lon(i,j) = lon(i,j) + 360.0
+       end if
+     end do
+   end do
+
+   got_latlon_out = .true.
+   do j = 1, ny
+     do i = 1, nx
+       if (lat(i,j) == rfill_lat .or. lon(i,j) == rfill_lon) then
+         got_latlon_out(i,j) = .false.
+       else
+         glat_out(i,j) = lat(i,j)
+         glon_out(i,j) = lon(i,j)
+       end if
+     end do
+   end do
+
+   deallocate(lat, lon)
+
+end subroutine read_latlon_2d
 
 subroutine read_HS_NC(ncid, nx, ny, nband, bt, gsolzen, gsatzen, time_start)
 

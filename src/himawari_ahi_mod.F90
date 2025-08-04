@@ -11,7 +11,7 @@ module mod_himawari_ahi
 !        - Convert Himawari Standard Data (HSD) files to ioda-v1 format. Works for 1 to nsegm files
 !        - Convert Himawari NetCDF files to ioda-v1 format.
 !     2. Get Himawari cloud mask or cloud type NetCDF data and add it to the data structure
-!     3. Get Himawari cloud top height, cloud top temperature, and cloud phase NetCDF data and add it to the data structure
+!     3. Get Himawari cloud top height, cloud top pressure, cloud top temperature, and cloud phase NetCDF data and add it to the data structure
 !
 ! Caveats:
 !     1. Currently only processes bands 7-16. These bands files need to be provided in flist.txt

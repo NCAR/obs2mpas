@@ -542,7 +542,7 @@ subroutine Himawari_ReBroadcast_converter(glon_out, glat_out, F_out, varname_out
 
       end if
 
-      ! process L2 products
+      ! process non-radiance products
 
       if ( got_clp ) then
          ffname = trim(data_dir)//'/'//trim(cm_file)

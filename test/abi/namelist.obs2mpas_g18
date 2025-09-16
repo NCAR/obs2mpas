@@ -1,0 +1,17 @@
+&data_nml
+  list_files = './flist.txt',
+  data_dir = '/glade/campaign/mmm/parc/ivette/pandac/previously_copied/abi_hourly_data_netcdf/2025071823/',   ! path of the GRB nc files
+  data_id = 'OR_ABI-L1b-RadF-M6', ! prefix of the downloaded GRB nc files
+  sat_id = 'G18',
+  n_subsample = 1,
+  write_iodav1 = .false.,
+/
+
+&main_nml
+  f_mpas_latlon = '/glade/campaign/mmm/parc/taosun/pandac/15kmMeshGFS/MPAS_IC/2018041500/x1.2621442.init.2018-04-15_00.00.00.nc', ! MPAS file path/name to read lat & lon information
+  f_mpas_out    = './newfile.nc', ! MPAS file for writing the interpolated obs fields
+  l_read_indx   = .false.,  ! read index and count for matching obs-MPAS pairs
+  l_write_indx  = .false.,   ! write index and count for matching obs-MPAS pairs
+  l_superob     = .true.,   ! .true.= mesh-based superob, .false.= nearest-neighbor
+  l_write_o2m_iodav1 = .true., ! .true.= write superob/neqrest-neighbor into ioda v1 file
+/

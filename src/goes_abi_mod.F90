@@ -558,6 +558,17 @@ subroutine read_GRB_grid(ncid, nx, ny, glat, glon, gzen, got_latlon)
       end do
    end do
 
+   ! longitudes are 0-360, convert them to -180 to 180
+   do j = 1, ny
+     do i = 1, nx
+       if (glon(i,j) > 180.0) then
+           glon(i,j) = glon(i,j) - 360.0
+       elseif (glon(i,j) < -180.0) then
+           glon(i,j) = glon(i,j) + 360.0
+       end if
+     end do
+   end do
+
    ! additional info for writing ioda at MPAS mesh !BJJ
    write(15,*) lon_sat, r_eq, h_sat
 
